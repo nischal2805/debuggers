@@ -23,7 +23,9 @@ export default function Profile() {
       navigate('/')
       return
     }
-    await signOut(auth)
+    if (auth) {
+      await signOut(auth)
+    }
     navigate('/')
   }
 

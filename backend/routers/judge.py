@@ -1,23 +1,18 @@
 """
-Code execution sandbox endpoints. Proxies the public Piston judge so we
-never expose execution infra credentials to the browser, and so we can
-fold the run/submit telemetry into the brain model.
+Code execution sandbox endpoints. Uses local subprocess runner.
 
 POST /judge/problems         — list available problems
 GET  /judge/problems/{id}    — full problem (statement, starter, public tests)
+GET  /judge/languages        — available runtimes
 POST /judge/run              — run public tests only
 POST /judge/submit           — run public + hidden tests, update brain model
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
-import os
 import time
 from typing import Optional
 
-import httpx
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 
@@ -25,11 +20,11 @@ import firebase_admin.auth as fb_auth
 
 from data.coding_problems import (
     CODING_PROBLEMS,
-    PISTON_LANGUAGE_VERSIONS,
     list_problems,
     get_problem,
 )
 from services import demo_store
+from services.runner import run_code as _runner_run, normalize_output, available_languages
 from services.firestore import (
     get_knowledge_model,
     save_knowledge_model,
@@ -40,8 +35,7 @@ from models.knowledge import update_mastery, migrate_knowledge_model
 
 router = APIRouter(prefix="/judge", tags=["judge"])
 
-PISTON_URL = os.environ.get("PISTON_URL", "https://emkc.org/api/v2/piston/execute")
-PISTON_TIMEOUT_S = float(os.environ.get("PISTON_TIMEOUT_S", "12"))
+RUNNER_TIMEOUT_S = 8.0
 
 
 class RunRequest(BaseModel):
@@ -73,54 +67,35 @@ async def _resolve_token(authorization: str) -> tuple[str, bool, str]:
         raise HTTPException(status_code=401, detail=str(e))
 
 
-async def _piston_execute(
-    *,
-    language: str,
-    source: str,
-    stdin: str,
-) -> dict:
-    cfg = PISTON_LANGUAGE_VERSIONS.get(language)
-    if not cfg:
-        raise HTTPException(status_code=400, detail=f"Unsupported language: {language}")
-    payload = {
-        "language": cfg["language"],
-        "version": cfg["version"],
-        "files": [{"content": source}],
-        "stdin": stdin,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=PISTON_TIMEOUT_S) as client:
-            r = await client.post(PISTON_URL, json=payload)
-            r.raise_for_status()
-            return r.json()
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Judge unavailable: {e}")
-
-
-def _normalize_output(text: str) -> str:
-    return (text or "").strip().replace("\r\n", "\n")
-
-
 async def _run_test_cases(language: str, source: str, tests: list[dict]) -> list[dict]:
-    """Run each test sequentially (Piston public is rate-limited)."""
     results: list[dict] = []
     for t in tests:
-        result = await _piston_execute(language=language, source=source, stdin=t.get("input", ""))
-        run_block = (result or {}).get("run") or {}
-        actual = _normalize_output(run_block.get("stdout", ""))
-        expected = _normalize_output(t.get("expected", ""))
-        passed = actual == expected
+        result = await _runner_run(
+            language=language,
+            source=source,
+            stdin=t.get("input", ""),
+            timeout_s=RUNNER_TIMEOUT_S,
+        )
+        actual = normalize_output(result.get("stdout", ""))
+        expected = normalize_output(t.get("expected", ""))
+        timed_out = result.get("timed_out", False)
+        passed = (not timed_out) and result.get("exit_code", 1) == 0 and actual == expected
         results.append({
             "input": t.get("input", ""),
             "expected": expected,
             "actual": actual,
-            "stderr": run_block.get("stderr", ""),
-            "exit_code": run_block.get("code"),
+            "stderr": result.get("stderr", ""),
+            "exit_code": result.get("exit_code"),
             "passed": passed,
-            "runtime_ms": run_block.get("runtime") or run_block.get("wall_time") or None,
+            "timed_out": timed_out,
+            "runtime_ms": result.get("runtime_ms"),
         })
-        await asyncio.sleep(0.1)  # be polite to public Piston
     return results
+
+
+@router.get("/languages")
+async def languages_list():
+    return {"languages": available_languages()}
 
 
 @router.get("/problems")
@@ -152,20 +127,30 @@ async def problem_detail(problem_id: str, _: str = Header("", alias="Authorizati
 
 
 @router.post("/run")
-async def run_code(req: RunRequest, authorization: str = Header(...)):
+async def run_code_endpoint(req: RunRequest, authorization: str = Header(...)):
     uid, is_demo, token = await _resolve_token(authorization)
     p = get_problem(req.problem_id)
     if not p:
         raise HTTPException(status_code=404, detail="Problem not found")
 
+    langs = available_languages()
+    if req.language not in langs:
+        raise HTTPException(status_code=400, detail=f"Unsupported language: {req.language}. Available: {langs}")
+
     if req.custom_input is not None:
-        result = await _piston_execute(language=req.language, source=req.source, stdin=req.custom_input)
-        run_block = (result or {}).get("run") or {}
+        result = await _runner_run(
+            language=req.language,
+            source=req.source,
+            stdin=req.custom_input,
+            timeout_s=RUNNER_TIMEOUT_S,
+        )
         return {
             "mode": "custom",
-            "stdout": _normalize_output(run_block.get("stdout", "")),
-            "stderr": run_block.get("stderr", ""),
-            "exit_code": run_block.get("code"),
+            "stdout": normalize_output(result.get("stdout", "")),
+            "stderr": result.get("stderr", ""),
+            "exit_code": result.get("exit_code"),
+            "timed_out": result.get("timed_out", False),
+            "runtime_ms": result.get("runtime_ms"),
         }
 
     started = time.time()
@@ -188,6 +173,10 @@ async def submit_code(req: SubmitRequest, authorization: str = Header(...)):
     if not p:
         raise HTTPException(status_code=404, detail="Problem not found")
 
+    langs = available_languages()
+    if req.language not in langs:
+        raise HTTPException(status_code=400, detail=f"Unsupported language: {req.language}. Available: {langs}")
+
     started = time.time()
     public_results = await _run_test_cases(req.language, req.source, p["public_tests"])
     hidden_results = await _run_test_cases(req.language, req.source, p["hidden_tests"])
@@ -197,22 +186,23 @@ async def submit_code(req: SubmitRequest, authorization: str = Header(...)):
     passed_tests = sum(1 for r in public_results + hidden_results if r["passed"])
     correct = passed_tests == total_tests
 
-    # Heuristic fingerprint based on output patterns
     fingerprint: Optional[str] = None
     if not correct:
+        any_timed_out = any(r.get("timed_out") for r in public_results + hidden_results)
         any_stderr = any(r["stderr"] for r in public_results + hidden_results)
         only_hidden_failed = (
             sum(1 for r in public_results if not r["passed"]) == 0
             and sum(1 for r in hidden_results if not r["passed"]) > 0
         )
-        if any_stderr:
+        if any_timed_out:
+            fingerprint = "time_limit_exceeded"
+        elif any_stderr:
             fingerprint = "syntax_error"
         elif only_hidden_failed:
             fingerprint = "edge_case_blindness"
         else:
             fingerprint = "incomplete_solution"
 
-    # Update brain model
     if is_demo:
         model = demo_store.get_model(token)
     else:
@@ -275,7 +265,7 @@ async def submit_code(req: SubmitRequest, authorization: str = Header(...)):
         "fingerprint": fingerprint,
         "public_results": public_results,
         "hidden_results": [
-            {**r, "input": "<hidden>", "expected": "<hidden>"}  # don't leak
+            {**r, "input": "<hidden>", "expected": "<hidden>"}
             for r in hidden_results
         ],
         "duration_ms": duration_ms,

@@ -30,6 +30,7 @@ export default function AdvisorWidget() {
 
   const getToken = async () => {
     if (isDemoMode && demoToken) return demoToken
+    if (!auth) return null
     return auth.currentUser?.getIdToken() ?? null
   }
 

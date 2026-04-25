@@ -60,12 +60,14 @@ export default function Onboarding() {
         const uid = user!.uid
         const knowledgeModel = buildDefaultKnowledgeModel(uid, newAnswers.level)
 
-        await setDoc(doc(db, 'users', uid, 'knowledgeModel', 'current'), knowledgeModel)
-        await updateDoc(doc(db, 'users', uid), {
-          goal: newAnswers.goal,
-          dailyGoalMinutes: parseInt(newAnswers.time),
-          onboarded: true,
-        })
+        if (db) {
+          await setDoc(doc(db, 'users', uid, 'knowledgeModel', 'current'), knowledgeModel)
+          await updateDoc(doc(db, 'users', uid), {
+            goal: newAnswers.goal,
+            dailyGoalMinutes: parseInt(newAnswers.time),
+            onboarded: true,
+          })
+        }
 
         navigate('/dashboard')
       } catch (err) {

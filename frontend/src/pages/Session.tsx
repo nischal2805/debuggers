@@ -333,7 +333,7 @@ export default function Session() {
 
           {answerType === 'code' && (
             <div className="mb-3" onKeyDown={() => noteFirstInput()}>
-              <CodeEditor value={codeAnswer} onChange={(v) => { noteFirstInput(); setCodeAnswer(v) }} height={180} />
+              <CodeEditor value={codeAnswer} onChange={(v) => { noteFirstInput(); setCodeAnswer(v ?? '') }} height={180} />
             </div>
           )}
 

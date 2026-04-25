@@ -205,6 +205,17 @@ class LLMProvider(abc.ABC):
         """Streaming completion yielding text chunks (still building one JSON document)."""
 
 
+class _NoopProvider(LLMProvider):
+    """Fallback when no LLM credentials are configured. Returns minimal valid JSON."""
+    name = "noop"
+
+    async def complete_json(self, prompt: str, *, max_tokens: int = 600, temperature: float = 0.2, system: Optional[str] = None) -> str:
+        return '{"correct":false,"feedback":"LLM provider not configured. Set LLM_PROVIDER and credentials in backend/.env","error_fingerprint":null,"optimality_score":{"time_complexity":0.5,"space_complexity":0.5,"code_clarity":0.5,"overall_optimality":0.5}}'
+
+    async def stream_json(self, prompt: str, *, max_tokens: int = 800, temperature: float = 0.35, system: Optional[str] = None) -> AsyncIterator[str]:
+        yield '{"type":"explanation","content":"LLM provider not configured. Add AWS credentials or a valid Gemini key to backend/.env","expected_answer_type":"text","difficulty_level":3,"pattern_name":null,"prereq_gap":{"detected":false,"weak_topic":null,"explanation":null},"session_summary":null,"evaluation":null,"next_action":"wait_for_answer","internal_note":"noop_provider"}'
+
+
 class GeminiProvider(LLMProvider):
     name = "gemini"
 
@@ -252,15 +263,14 @@ class GeminiProvider(LLMProvider):
 
 
 class ClaudeProvider(LLMProvider):
-    """Stub for the future Claude swap. Wire up when ANTHROPIC_API_KEY is available."""
+    """Direct Anthropic API (requires ANTHROPIC_API_KEY)."""
     name = "claude"
 
-    def __init__(self, model_name: str = "claude-opus-4-7") -> None:
+    def __init__(self, model_name: str = "claude-haiku-4-5-20251001") -> None:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY required for ClaudeProvider")
         self.model_name = model_name
-        # Lazy import so absence of the SDK doesn't crash other providers
         try:
             from anthropic import AsyncAnthropic
             self._client = AsyncAnthropic(api_key=api_key)
@@ -282,7 +292,6 @@ class ClaudeProvider(LLMProvider):
             system=system or "Return only valid JSON.",
             messages=[{"role": "user", "content": prompt}],
         )
-        # Anthropic returns content blocks; join text blocks
         parts = [b.text for b in msg.content if getattr(b, "type", "") == "text"]
         return "".join(parts)
 
@@ -305,6 +314,100 @@ class ClaudeProvider(LLMProvider):
                 yield text
 
 
+class BedrockProvider(LLMProvider):
+    """
+    AWS Bedrock — Claude via boto3.
+    Set env vars: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION (default us-east-1).
+    Model: anthropic.claude-3-5-haiku-20241022-v1:0  (fast + cheap on Bedrock free credits).
+    """
+    name = "bedrock"
+
+    def __init__(self, model_id: Optional[str] = None) -> None:
+        self.model_id = model_id or os.environ.get(
+            "BEDROCK_MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0"
+        )
+        self.region = os.environ.get("AWS_REGION", "us-east-1")
+        try:
+            import boto3
+            self._client = boto3.client(
+                "bedrock-runtime",
+                region_name=self.region,
+                aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+                aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+            )
+        except Exception as e:
+            raise RuntimeError(f"boto3 not installed or AWS credentials missing: {e}")
+
+    def _build_body(self, prompt: str, system: Optional[str], max_tokens: int, temperature: float) -> dict:
+        return {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system or "Return only valid JSON.",
+            "messages": [{"role": "user", "content": prompt}],
+        }
+
+    async def complete_json(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 600,
+        temperature: float = 0.2,
+        system: Optional[str] = None,
+    ) -> str:
+        import json as _json
+        import asyncio
+        body = _json.dumps(self._build_body(prompt, system, max_tokens, temperature))
+
+        def _invoke():
+            resp = self._client.invoke_model(
+                modelId=self.model_id,
+                body=body,
+                contentType="application/json",
+                accept="application/json",
+            )
+            return _json.loads(resp["body"].read())
+
+        result = await asyncio.get_event_loop().run_in_executor(None, _invoke)
+        parts = [b["text"] for b in result.get("content", []) if b.get("type") == "text"]
+        return "".join(parts)
+
+    async def stream_json(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 800,
+        temperature: float = 0.35,
+        system: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        import json as _json
+        import asyncio
+        body = _json.dumps(self._build_body(prompt, system, max_tokens, temperature))
+
+        def _invoke_stream():
+            resp = self._client.invoke_model_with_response_stream(
+                modelId=self.model_id,
+                body=body,
+                contentType="application/json",
+                accept="application/json",
+            )
+            chunks = []
+            for event in resp["body"]:
+                chunk = event.get("chunk")
+                if chunk:
+                    data = _json.loads(chunk["bytes"])
+                    if data.get("type") == "content_block_delta":
+                        text = data.get("delta", {}).get("text", "")
+                        if text:
+                            chunks.append(text)
+            return chunks
+
+        texts = await asyncio.get_event_loop().run_in_executor(None, _invoke_stream)
+        for text in texts:
+            yield text
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Provider factory
 # ─────────────────────────────────────────────────────────────────────────────
@@ -312,15 +415,28 @@ class ClaudeProvider(LLMProvider):
 _provider: LLMProvider | None = None
 
 
+def reset_provider():
+    """Force re-initialization of provider (useful when env vars change)."""
+    global _provider
+    _provider = None
+
+
 def get_provider() -> LLMProvider:
     global _provider
     if _provider is not None:
         return _provider
     name = (os.environ.get("LLM_PROVIDER", "gemini") or "gemini").strip().lower()
-    if name == "claude":
-        _provider = ClaudeProvider()
-    else:
-        _provider = GeminiProvider()
+    try:
+        if name == "bedrock":
+            _provider = BedrockProvider()
+        elif name == "claude":
+            _provider = ClaudeProvider()
+        else:
+            _provider = GeminiProvider()
+    except Exception as e:
+        import sys
+        print(f"WARNING: LLM provider '{name}' failed to init: {e}", file=sys.stderr)
+        _provider = _NoopProvider()
     return _provider
 
 
@@ -412,6 +528,7 @@ async def stream_agent_response(
     action: str,
     user_message: str = "",
     evaluation: dict | None = None,
+    thought_trace: str | None = None,
 ):
     """
     Main streaming generator for the agent.
@@ -421,6 +538,8 @@ async def stream_agent_response(
       {"type": "agent_action", "action": str, "topic": str}
       {"type": "chunk", "text": str}
       {"type": "response", "data": dict}
+    
+    thought_trace: optional user reasoning before answering. LLM evaluates the reasoning separately.
     """
     topic = session_state.get("active_topic", session_state.get("topic", "arrays"))
     knowledge = knowledge_model.get("topics", {}).get(topic, {}).get(
@@ -479,6 +598,7 @@ async def stream_agent_response(
         evaluation=evaluation,
         user_message=user_message,
         problems_hint=problems_hint,
+        thought_trace=thought_trace,
     )
 
     # 4. Build system prompt

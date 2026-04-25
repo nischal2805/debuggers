@@ -17,7 +17,7 @@ export default function ProtectedRoute({ children, requireOnboarded }: Props) {
 
   useEffect(() => {
     // Demo users are always considered onboarded
-    if (isDemoMode || !user || !requireOnboarded) return
+    if (isDemoMode || !user || !requireOnboarded || !db) return
     setChecking(true)
     getDoc(doc(db, 'users', user.uid)).then((snap) => {
       setOnboarded(snap.exists() ? (snap.data()?.onboarded ?? false) : false)

@@ -119,7 +119,7 @@ export function useTutorSession(topicId: string) {
     const difficulty = Number(payload.difficulty_level)
     payload.difficulty_level = Number.isFinite(difficulty) ? Math.max(1, Math.min(10, Math.trunc(difficulty))) : 3
     if (!('next_action' in payload)) payload.next_action = 'wait_for_answer'
-    return payload as TutorResponse
+    return payload as unknown as TutorResponse
   }
 
   const clearProactiveTimer = useCallback(() => {
@@ -144,6 +144,10 @@ export function useTutorSession(topicId: string) {
     if (isDemoMode && demoToken) {
       token = demoToken
     } else {
+      if (!auth) {
+        // Firebase not initialized, skip connection
+        return
+      }
       const firebaseUser = auth.currentUser
       if (!firebaseUser) {
         if (authRetryCountRef.current < 10) {

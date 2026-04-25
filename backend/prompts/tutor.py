@@ -48,13 +48,25 @@ Return exactly this JSON — every field required:
     "partial_credit": 0.0,
     "feedback": "",
     "errors": [],
-    "hint_for_retry": null
+    "hint_for_retry": null,
+    "reasoning_quality": "sound" | "partial" | "flawed" | null,
+    "reasoning_feedback": "<critique of reasoning if thought trace was provided, otherwise null>"
   }} | null,
   "internal_note": "<why you chose this>",
   "next_action": "wait_for_answer" | "end_session" | "transition_topic"
 }}
 
 IMPORTANT: The `content` field must contain only learner-facing text. Never place JSON inside `content`.
+
+## LIVE THOUGHT TRACE FEATURE
+When the learner provides a thought_trace (their reasoning before answering):
+1. Evaluate the reasoning separately from the answer correctness
+2. Set reasoning_quality to: "sound" (correct reasoning path), "partial" (some gaps), or "flawed" (incorrect)
+3. In reasoning_feedback, cite exactly where the reasoning diverges from the correct approach
+4. Example: User says "I think it's O(log n) because we divide the array" but picked the right answer.
+   - Answer: correct ✓
+   - Reasoning: partial ⚠️
+   - Feedback: "Correct answer, but your reasoning has a gap. Division helps, but the BST property is key—it lets us eliminate the irrelevant half. Without that property, division doesn't guarantee efficiency."
 
 ## Teaching Rules
 - mastery < 0.3: conceptual/definition questions only. No code.

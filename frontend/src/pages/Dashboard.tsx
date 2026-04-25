@@ -7,6 +7,7 @@ import { useStore } from '../store/useStore'
 import { useKnowledgeModel } from '../hooks/useKnowledgeModel'
 import { TOPIC_GRAPH, getMasteryColor, arePrereqsMet } from '../lib/topics'
 import MasteryNode from '../components/MasteryNode'
+import ProgressiveGraph from '../components/ProgressiveGraph'
 import SkillRadar from '../components/SkillRadar'
 import SessionHeatmap from '../components/SessionHeatmap'
 import ReadinessCard from '../components/ReadinessCard'
@@ -34,6 +35,7 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [recommended, setRecommended] = useState<string | null>(null)
   const [roadmap, setRoadmap] = useState<string[]>([])
+  const [useProgressiveGraph, setUseProgressiveGraph] = useState(false)
 
   // Fetch roadmap from backend (authoritative)
   useEffect(() => {
@@ -41,7 +43,7 @@ export default function Dashboard() {
     const { isDemoMode, demoToken } = useStore.getState()
     const tokenPromise = isDemoMode && demoToken
       ? Promise.resolve(demoToken)
-      : auth.currentUser?.getIdToken() ?? Promise.resolve(null)
+      : auth && auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
 
     tokenPromise.then(token => {
       if (!token) return
@@ -129,7 +131,7 @@ export default function Dashboard() {
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: { id: string }) => {
     if (!arePrereqsMet(node.id, masteryMap)) return
-    navigate(`/session/${node.id}`)
+    navigate(`/solve/${node.id}`)
   }, [masteryMap, navigate])
 
   const weakTopics = useMemo(() => {
@@ -156,8 +158,15 @@ export default function Dashboard() {
       <header className="flex items-center justify-between px-6 py-4 border-b border-border">
         <span className="font-display font-bold text-text-primary text-lg tracking-tight">NeuralDSA</span>
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setUseProgressiveGraph(!useProgressiveGraph)}
+            className="font-body text-xs text-text-secondary hover:text-accent-secondary transition-colors px-3 py-1 rounded border border-border/50"
+          >
+            {useProgressiveGraph ? 'full graph' : 'progressive'}
+          </button>
           <button onClick={() => navigate('/roadmap')} className="font-body text-text-secondary text-sm hover:text-text-primary transition-colors">roadmap</button>
           <button onClick={() => navigate('/profile')} className="font-body text-text-secondary text-sm hover:text-text-primary transition-colors">profile</button>
+          <button onClick={() => navigate('/judge')} className="font-body text-text-secondary text-sm hover:text-text-primary transition-colors">judge</button>
           <div className="w-7 h-7 rounded-full bg-accent-primary/20 border border-accent-primary/30 flex items-center justify-center text-xs font-body text-accent-primary">
             {user?.name?.[0] ?? 'U'}
           </div>
@@ -166,21 +175,25 @@ export default function Dashboard() {
 
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 min-h-[500px]">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={onNodeClick}
-            nodeTypes={NODE_TYPES}
-            fitView
-            fitViewOptions={{ padding: 0.15 }}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="rgba(108,99,255,0.1)" />
-            <Controls />
-            <MiniMap nodeColor={(n) => getMasteryColor((n.data as { mastery: number }).mastery ?? 0)} maskColor="rgba(10,10,15,0.8)" />
-          </ReactFlow>
+          {useProgressiveGraph ? (
+            <ProgressiveGraph model={model} />
+          ) : (
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={onNodeClick}
+              nodeTypes={NODE_TYPES}
+              fitView
+              fitViewOptions={{ padding: 0.15 }}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="rgba(108,99,255,0.1)" />
+              <Controls />
+              <MiniMap nodeColor={(n) => getMasteryColor((n.data as { mastery: number }).mastery ?? 0)} maskColor="rgba(10,10,15,0.8)" />
+            </ReactFlow>
+          )}
         </div>
 
         <aside className="w-72 border-l border-border flex flex-col overflow-y-auto scrollbar-thin">
@@ -198,16 +211,16 @@ export default function Dashboard() {
               </p>
               <div className="flex gap-2">
                 <button
-                  onClick={() => navigate(`/session/${recommended}`)}
+                  onClick={() => navigate(`/solve/${recommended}`)}
                   className="flex-1 bg-accent-primary hover:bg-accent-primary/90 text-white font-body text-sm py-2.5 rounded-lg transition-colors"
                 >
-                  tutor session
+                  solve problem
                 </button>
                 <button
-                  onClick={() => navigate(`/solve/${recommended}`)}
-                  className="flex-1 border border-accent-primary/40 text-accent-primary font-body text-sm py-2.5 rounded-lg hover:bg-accent-primary/10 transition-colors"
+                  onClick={() => navigate(`/session/${recommended}`)}
+                  className="flex-1 border border-border text-text-secondary font-body text-sm py-2.5 rounded-lg hover:bg-bg-elevated transition-colors"
                 >
-                  solve problem
+                  concept session
                 </button>
               </div>
             </div>
@@ -220,7 +233,7 @@ export default function Dashboard() {
                 {nextInRoadmap.map((topicId, i) => (
                   <button
                     key={topicId}
-                    onClick={() => navigate(`/session/${topicId}`)}
+                    onClick={() => navigate(`/solve/${topicId}`)}
                     className="w-full flex items-center gap-3 text-left hover:bg-bg-elevated rounded-lg p-2 transition-colors group"
                   >
                     <span className="font-body text-[10px] text-text-secondary w-4">{i + 1}</span>

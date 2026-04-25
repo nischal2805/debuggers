@@ -284,6 +284,7 @@ def build_agent_prompt(
     evaluation: Optional[dict],
     user_message: str,
     problems_hint: str,
+    thought_trace: Optional[str] = None,
 ) -> str:
     topic = session_state.get("active_topic", session_state.get("topic", "arrays"))
     knowledge = _topic_knowledge(knowledge_model, topic)
@@ -308,9 +309,20 @@ def build_agent_prompt(
             "Populate the `evaluation` object with: correct, partial_credit, feedback, errors, "
             "error_fingerprint (one of: optimization_blindness, complexity_confusion, "
             "space_time_mixup, off_by_one, pattern_overfitting, edge_case_blindness, prereq_gap, "
-            "syntax_error, incomplete_solution; omit when correct), and hint_for_retry. "
+            "syntax_error, incomplete_solution; omit when correct), hint_for_retry, "
+            "reasoning_quality ('sound', 'partial', 'flawed', or null if no thought_trace), "
+            "and reasoning_feedback (critique of their reasoning if thought_trace was provided). "
             "Then provide concise learner-facing content in `content`."
         )
+        
+        if thought_trace:
+            lines.append(f"THOUGHT TRACE (learner's reasoning): {thought_trace}")
+            lines.append(
+                "REASONING INSTRUCTION: Evaluate the learner's thought process separately from the answer. "
+                "Set reasoning_quality to 'sound' if the reasoning path is correct, 'partial' if there are gaps, "
+                "or 'flawed' if the reasoning is incorrect. In reasoning_feedback, cite exactly where the reasoning diverges. "
+                "Example: answer correct but reasoning shows they don't understand the pattern — call this out."
+            )
 
     if evaluation:
         lines += [

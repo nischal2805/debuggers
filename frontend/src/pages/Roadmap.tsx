@@ -208,7 +208,7 @@ export default function Roadmap() {
       })
       return
     }
-    if (!node.data.locked) navigate(`/session/${node.id}`)
+    if (!node.data.locked) navigate(`/solve/${node.id}`)
   }, [navigate])
 
   if (!model) {

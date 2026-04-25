@@ -10,6 +10,7 @@ import Session from './pages/Session'
 import Solve from './pages/Solve'
 import Roadmap from './pages/Roadmap'
 import Profile from './pages/Profile'
+import JudgeDashboard from './pages/JudgeDashboard'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
@@ -20,6 +21,14 @@ export default function App() {
     const savedDemo = sessionStorage.getItem('neuraldsa_demo_token')
     if (savedDemo) {
       enterDemoMode(savedDemo)
+      return
+    }
+
+    // If Firebase not initialized, use demo mode
+    if (!auth) {
+      const token = `demo_${Math.random().toString(36).slice(2, 10)}`
+      sessionStorage.setItem('neuraldsa_demo_token', token)
+      enterDemoMode(token)
       return
     }
 
@@ -71,6 +80,11 @@ export default function App() {
         <Route path="/profile" element={
           <ProtectedRoute requireOnboarded>
             <Profile />
+          </ProtectedRoute>
+        } />
+        <Route path="/judge" element={
+          <ProtectedRoute requireOnboarded>
+            <JudgeDashboard />
           </ProtectedRoute>
         } />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -10,7 +10,7 @@ export function useKnowledgeModel() {
 
   useEffect(() => {
     // Demo mode: knowledge model lives in Zustand only, updated via mastery_update WS events
-    if (!user || isDemoMode) return
+    if (!user || isDemoMode || !db) return
 
     const ref = doc(db, 'users', user.uid, 'knowledgeModel', 'current')
     const unsubscribe = onSnapshot(ref, async (snap) => {

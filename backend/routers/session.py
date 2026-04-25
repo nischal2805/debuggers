@@ -249,6 +249,7 @@ async def session_stream(
                 action=action,
                 user_message=user_message,
                 evaluation=evaluation,
+                thought_trace=thought_trace,
             ):
                 if chunk["type"] == "agent_mode":
                     agent_mode_for_event = chunk.get("mode")
