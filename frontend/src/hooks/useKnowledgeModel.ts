@@ -6,10 +6,11 @@ import type { KnowledgeModel } from '../lib/types'
 import { buildDefaultKnowledgeModel } from '../lib/types'
 
 export function useKnowledgeModel() {
-  const { user, knowledgeModel, setKnowledgeModel } = useStore()
+  const { user, isDemoMode, knowledgeModel, setKnowledgeModel } = useStore()
 
   useEffect(() => {
-    if (!user) return
+    // Demo mode: knowledge model lives in Zustand only, updated via mastery_update WS events
+    if (!user || isDemoMode) return
 
     const ref = doc(db, 'users', user.uid, 'knowledgeModel', 'current')
     const unsubscribe = onSnapshot(ref, async (snap) => {
@@ -23,7 +24,7 @@ export function useKnowledgeModel() {
     })
 
     return unsubscribe
-  }, [user, setKnowledgeModel])
+  }, [user, isDemoMode, setKnowledgeModel])
 
   return knowledgeModel
 }

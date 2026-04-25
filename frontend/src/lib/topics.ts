@@ -62,6 +62,65 @@ export const DSA_CATEGORIES = {
   expert: ['dp_2d', 'dp_knapsack', 'dp_lcs', 'segment_tree', 'fenwick_tree', 'dp_graphs'],
 }
 
+// ─── L0 domain groups (progressive-disclosure root level) ────────────────────
+
+export interface DomainGroup {
+  label: string
+  topics: string[]
+  color: string
+}
+
+export const DOMAIN_GROUPS: Record<string, DomainGroup> = {
+  arrays_strings: {
+    label: 'Arrays & Strings',
+    topics: ['arrays', 'strings', 'sorting', 'hashing', 'two_pointers', 'sliding_window', 'prefix_sum', 'binary_search', 'bit_manipulation', 'intervals'],
+    color: '#6c63ff',
+  },
+  linked_structures: {
+    label: 'Linked Structures',
+    topics: ['linked_list', 'doubly_linked_list', 'fast_slow_pointers', 'stack', 'queue', 'monotonic_stack', 'deque'],
+    color: '#00d4ff',
+  },
+  recursion_search: {
+    label: 'Recursion & Search',
+    topics: ['recursion', 'backtracking', 'divide_conquer', 'greedy', 'string_matching'],
+    color: '#ffb300',
+  },
+  trees: {
+    label: 'Trees',
+    topics: ['binary_tree', 'bst', 'tree_traversal', 'heap', 'lowest_common_ancestor', 'trie', 'segment_tree', 'fenwick_tree', 'merge_sort', 'quick_sort'],
+    color: '#00e676',
+  },
+  graphs: {
+    label: 'Graphs',
+    topics: ['graph_basics', 'bfs', 'dfs', 'topological_sort', 'union_find', 'shortest_path_dijkstra', 'shortest_path_bellman', 'minimum_spanning_tree'],
+    color: '#ff8a4d',
+  },
+  dynamic_programming: {
+    label: 'Dynamic Programming',
+    topics: ['dp_intro', 'dp_1d', 'dp_2d', 'dp_knapsack', 'dp_lcs', 'dp_trees', 'dp_graphs'],
+    color: '#ff4757',
+  },
+}
+
+export function getDomainForTopic(topicId: string): string | null {
+  for (const [domain, group] of Object.entries(DOMAIN_GROUPS)) {
+    if (group.topics.includes(topicId)) return domain
+  }
+  return null
+}
+
+export function aggregateDomainMastery(
+  domainId: string,
+  masteryMap: Record<string, number>
+): { avg: number; mastered: number; total: number } {
+  const topics = DOMAIN_GROUPS[domainId]?.topics ?? []
+  const values = topics.map(t => masteryMap[t] ?? 0)
+  const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
+  const mastered = values.filter(v => v >= 0.85).length
+  return { avg, mastered, total: topics.length }
+}
+
 export function getMasteryColor(mastery: number): string {
   return `hsl(${mastery * 120}, 70%, 50%)`
 }

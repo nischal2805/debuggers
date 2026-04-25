@@ -9,6 +9,10 @@ import { TOPIC_GRAPH, getMasteryColor, arePrereqsMet } from '../lib/topics'
 import MasteryNode from '../components/MasteryNode'
 import SkillRadar from '../components/SkillRadar'
 import SessionHeatmap from '../components/SessionHeatmap'
+import ReadinessCard from '../components/ReadinessCard'
+import Last10Streak from '../components/Last10Streak'
+import TrajectorySparkline from '../components/TrajectorySparkline'
+import AdvisorWidget from '../components/AdvisorWidget'
 
 const NODE_TYPES = { masteryNode: MasteryNode }
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
@@ -25,7 +29,7 @@ function getWhyNextExplanation(topicId: string, masteryMap: Record<string, numbe
 }
 
 export default function Dashboard() {
-  const { user } = useStore()
+  const { user, readiness, calibrationGap, answerStreak } = useStore()
   const model = useKnowledgeModel()
   const navigate = useNavigate()
   const [recommended, setRecommended] = useState<string | null>(null)
@@ -34,7 +38,13 @@ export default function Dashboard() {
   // Fetch roadmap from backend (authoritative)
   useEffect(() => {
     if (!user) return
-    auth.currentUser?.getIdToken().then(token => {
+    const { isDemoMode, demoToken } = useStore.getState()
+    const tokenPromise = isDemoMode && demoToken
+      ? Promise.resolve(demoToken)
+      : auth.currentUser?.getIdToken() ?? Promise.resolve(null)
+
+    tokenPromise.then(token => {
+      if (!token) return
       fetch(`${BACKEND_URL}/user/roadmap`, {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -69,6 +79,8 @@ export default function Dashboard() {
     return m
   }, [model])
 
+  const masteredJustNow = useStore(s => s.masteredJustNow)
+
   const rawNodes = useMemo(() => {
     return Object.entries(TOPIC_GRAPH).map(([id, meta]) => {
       const mastery = masteryMap[id] ?? 0
@@ -86,10 +98,11 @@ export default function Dashboard() {
           locked,
           recommended: id === recommended,
           category: meta.category,
+          justMastered: masteredJustNow.includes(id),
         },
       }
     })
-  }, [masteryMap, recommended, model])
+  }, [masteryMap, recommended, model, masteredJustNow])
 
   const rawEdges = useMemo(() => {
     return Object.entries(TOPIC_GRAPH).flatMap(([id, meta]) =>
@@ -183,12 +196,20 @@ export default function Dashboard() {
               <p className="font-body text-[10px] text-accent-primary/60 mb-4">
                 Difficulty {TOPIC_GRAPH[recommended]?.difficulty}/6
               </p>
-              <button
-                onClick={() => navigate(`/session/${recommended}`)}
-                className="w-full bg-accent-primary hover:bg-accent-primary/90 text-white font-body text-sm py-2.5 rounded-lg transition-colors"
-              >
-                start session
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => navigate(`/session/${recommended}`)}
+                  className="flex-1 bg-accent-primary hover:bg-accent-primary/90 text-white font-body text-sm py-2.5 rounded-lg transition-colors"
+                >
+                  tutor session
+                </button>
+                <button
+                  onClick={() => navigate(`/solve/${recommended}`)}
+                  className="flex-1 border border-accent-primary/40 text-accent-primary font-body text-sm py-2.5 rounded-lg hover:bg-accent-primary/10 transition-colors"
+                >
+                  solve problem
+                </button>
+              </div>
             </div>
           )}
 
@@ -218,6 +239,23 @@ export default function Dashboard() {
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          <div className="p-5 border-b border-border">
+            <ReadinessCard snapshot={readiness} calibrationGap={calibrationGap} />
+          </div>
+
+          {answerStreak.length > 0 && (
+            <div className="p-5 border-b border-border">
+              <Last10Streak />
+            </div>
+          )}
+
+          {(model.readinessHistory ?? []).length >= 2 && (
+            <div className="p-5 border-b border-border">
+              <p className="font-body text-text-secondary text-xs mb-3 uppercase tracking-wider">Readiness trajectory</p>
+              <TrajectorySparkline points={model.readinessHistory!} width={200} height={48} />
             </div>
           )}
 
@@ -254,6 +292,7 @@ export default function Dashboard() {
           </div>
         </aside>
       </div>
+      <AdvisorWidget />
     </div>
   )
 }

@@ -7,14 +7,22 @@ import Landing from './pages/Landing'
 import Onboarding from './pages/Onboarding'
 import Dashboard from './pages/Dashboard'
 import Session from './pages/Session'
+import Solve from './pages/Solve'
 import Roadmap from './pages/Roadmap'
 import Profile from './pages/Profile'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
-  const { setUser, setLoading } = useStore()
+  const { setUser, setLoading, enterDemoMode } = useStore()
 
   useEffect(() => {
+    // Restore demo mode across page refreshes
+    const savedDemo = sessionStorage.getItem('neuraldsa_demo_token')
+    if (savedDemo) {
+      enterDemoMode(savedDemo)
+      return
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser({
@@ -29,7 +37,7 @@ export default function App() {
       setLoading(false)
     })
     return unsubscribe
-  }, [setUser, setLoading])
+  }, [setUser, setLoading, enterDemoMode])
 
   return (
     <BrowserRouter>
@@ -48,6 +56,11 @@ export default function App() {
         <Route path="/session/:topicId" element={
           <ProtectedRoute requireOnboarded>
             <Session />
+          </ProtectedRoute>
+        } />
+        <Route path="/solve/:topicId" element={
+          <ProtectedRoute requireOnboarded>
+            <Solve />
           </ProtectedRoute>
         } />
         <Route path="/roadmap" element={

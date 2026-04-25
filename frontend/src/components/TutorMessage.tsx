@@ -51,6 +51,8 @@ export default function TutorMessage({ message, difficultyLevel }: Props) {
     feedback: message.content.toLowerCase().includes('correct') ? 'border-accent-success/30' : 'border-accent-danger/30',
     celebration: 'border-accent-success/30',
     topic_transition: 'border-accent-secondary/30',
+    prereq_intervention: 'border-accent-warn/30',
+    session_summary: 'border-accent-primary/30',
   }[message.type ?? 'explanation'] ?? 'border-border'
 
   return (

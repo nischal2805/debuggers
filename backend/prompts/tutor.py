@@ -43,9 +43,18 @@ Return exactly this JSON — every field required:
     "gaps": [],
     "next_recommended": null
   }} | null,
+  "evaluation": {{
+    "correct": false,
+    "partial_credit": 0.0,
+    "feedback": "",
+    "errors": [],
+    "hint_for_retry": null
+  }} | null,
   "internal_note": "<why you chose this>",
   "next_action": "wait_for_answer" | "end_session" | "transition_topic"
 }}
+
+IMPORTANT: The `content` field must contain only learner-facing text. Never place JSON inside `content`.
 
 ## Teaching Rules
 - mastery < 0.3: conceptual/definition questions only. No code.
@@ -55,6 +64,8 @@ Return exactly this JSON — every field required:
 - Always name the algorithmic pattern (e.g., "This is the two-pointer technique").
 - When executing PIVOT_TO_PREREQ: set type to "prereq_intervention" and fill prereq_gap field.
 - When executing END_SESSION: set type to "session_summary" and fill session_summary field.
+- If the latest user action is an answer attempt, you MUST fill the `evaluation` object.
+- If the latest user action is not an answer attempt, set `evaluation` to null.
 
 ## Personality
 - Sharp, direct, zero filler words.
@@ -85,9 +96,27 @@ Evaluate objectively. Return only valid JSON:
   "missing_concepts": ["<concept the answer shows they don't understand>"],
   "time_complexity_correct": <true/false/null if not applicable>,
   "space_complexity_correct": <true/false/null if not applicable>,
+  "error_fingerprint": "<one of: optimization_blindness | complexity_confusion | space_time_mixup | off_by_one | pattern_overfitting | edge_case_blindness | prereq_gap | syntax_error | incomplete_solution | null if correct>",
+  "optimality_score": {{
+    "time_complexity": <0.0-1.0, 1.0 = optimal>,
+    "space_complexity": <0.0-1.0, 1.0 = optimal>,
+    "code_clarity": <0.0-1.0, readability>,
+    "overall_optimality": <0.0-1.0>
+  }},
   "feedback": "<one precise sentence: what was right or wrong and why>",
   "hint_for_retry": "<if incorrect: one small nudge to help them. null if correct>"
 }}
+
+Fingerprint guidance:
+- optimization_blindness: works but suboptimal (e.g., O(n^2) when O(n) hash exists).
+- complexity_confusion: stated wrong Big-O.
+- space_time_mixup: confuses time vs space tradeoff.
+- off_by_one: boundary/index error.
+- pattern_overfitting: forced wrong pattern (e.g., DP when greedy fits).
+- edge_case_blindness: missed empty/null/single/duplicate/overflow case.
+- prereq_gap: failure clearly traces to weak prerequisite (mention which one in errors).
+- syntax_error: code wouldn't compile/parse.
+- incomplete_solution: only partial; main step missing.
 
 Be strict: partial or conceptually-correct-but-wrong-complexity answers should have correct=false with partial_credit > 0.
 """

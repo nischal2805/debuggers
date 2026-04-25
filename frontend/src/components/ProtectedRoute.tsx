@@ -1,4 +1,5 @@
-import { ReactNode, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Navigate } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../firebase'
@@ -10,18 +11,19 @@ interface Props {
 }
 
 export default function ProtectedRoute({ children, requireOnboarded }: Props) {
-  const { user, loading } = useStore()
+  const { user, loading, isDemoMode } = useStore()
   const [onboarded, setOnboarded] = useState<boolean | null>(null)
   const [checking, setChecking] = useState(false)
 
   useEffect(() => {
-    if (!user || !requireOnboarded) return
+    // Demo users are always considered onboarded
+    if (isDemoMode || !user || !requireOnboarded) return
     setChecking(true)
     getDoc(doc(db, 'users', user.uid)).then((snap) => {
       setOnboarded(snap.exists() ? (snap.data()?.onboarded ?? false) : false)
       setChecking(false)
     })
-  }, [user, requireOnboarded])
+  }, [user, requireOnboarded, isDemoMode])
 
   if (loading || checking) {
     return (
@@ -33,7 +35,8 @@ export default function ProtectedRoute({ children, requireOnboarded }: Props) {
 
   if (!user) return <Navigate to="/" replace />
 
-  if (requireOnboarded && onboarded === false) {
+  // Demo users skip the onboarding check
+  if (requireOnboarded && !isDemoMode && onboarded === false) {
     return <Navigate to="/onboard" replace />
   }
 

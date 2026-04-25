@@ -4,19 +4,20 @@ const MonacoEditor = lazy(() => import('@monaco-editor/react'))
 
 interface Props {
   value: string
-  onChange: (v: string) => void
+  onChange: (v: string | undefined) => void
   language?: string
-  height?: number
+  height?: number | string
+  hideLanguageBar?: boolean
 }
 
 const LANGUAGES = ['python', 'java', 'cpp', 'javascript']
 
-export default function CodeEditor({ value, onChange, language = 'python', height = 200 }: Props) {
+export default function CodeEditor({ value, onChange, language = 'python', height = 200, hideLanguageBar = false }: Props) {
   const [lang, setLang] = useState(language)
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-bg-elevated border-b border-border">
+    <div className="border border-border rounded-lg overflow-hidden h-full flex flex-col">
+      {!hideLanguageBar && <div className="flex items-center gap-2 px-3 py-2 bg-bg-elevated border-b border-border flex-shrink-0">
         {LANGUAGES.map(l => (
           <button
             key={l}
@@ -30,7 +31,7 @@ export default function CodeEditor({ value, onChange, language = 'python', heigh
             {l}
           </button>
         ))}
-      </div>
+      </div>}
       <Suspense fallback={
         <div style={{ height }} className="bg-bg-surface flex items-center justify-center">
           <div className="w-5 h-5 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />

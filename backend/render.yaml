@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: neuraldsa-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: DEMO_MODE
+        value: "false"
+    healthCheckPath: /health
