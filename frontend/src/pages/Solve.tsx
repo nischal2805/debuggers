@@ -72,7 +72,7 @@ function mkId() { return ++_msgId }
 export default function Solve() {
   const { topicId } = useParams<{ topicId: string }>()
   const navigate = useNavigate()
-  const { isDemoMode, demoToken, updateTopicMastery } = useStore()
+  const { isDemoMode, demoToken, updateTopicMastery, knowledgeModel } = useStore()
 
   const [problem, setProblem] = useState<Problem | null>(null)
   const [loadingProblem, setLoadingProblem] = useState(true)
@@ -330,6 +330,20 @@ export default function Solve() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Interview mode unlock — shows when mastery >= 70% */}
+          {(() => {
+            const topicMastery = knowledgeModel?.topics?.[topicId ?? '']?.mastery ?? 0
+            return topicMastery >= 0.70 ? (
+              <button
+                onClick={() => navigate(`/interview/${topicId}`)}
+                className="px-2 py-1 text-[10px] font-body font-medium border border-accent-danger/40 text-accent-danger rounded hover:bg-accent-danger/10 transition-colors"
+                title="You're ready. Enter interview mode."
+              >
+                Interview Mode
+              </button>
+            ) : null
+          })()}
+
           <span className="font-mono text-xs text-text-secondary w-12 text-center">{fmt(elapsed)}</span>
 
           <select

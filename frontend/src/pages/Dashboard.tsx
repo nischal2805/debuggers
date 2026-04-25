@@ -14,6 +14,7 @@ import ReadinessCard from '../components/ReadinessCard'
 import Last10Streak from '../components/Last10Streak'
 import TrajectorySparkline from '../components/TrajectorySparkline'
 import AdvisorWidget from '../components/AdvisorWidget'
+import CountdownWidget from '../components/CountdownWidget'
 
 const NODE_TYPES = { masteryNode: MasteryNode }
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
@@ -313,6 +314,9 @@ export default function Dashboard() {
           </div>
 
           <div className="p-5">
+            <div className="mb-4">
+              <CountdownWidget />
+            </div>
             <SessionHeatmap sessionDates={sessionDates} />
             <div className="mt-4 flex gap-4">
               <div>

@@ -176,3 +176,109 @@ async def get_sessions(authorization: str = Header(...)):
         d["id"] = s.id
         rows.append(d)
     return {"sessions": rows}
+
+
+from datetime import datetime, timezone
+from pydantic import BaseModel
+
+
+class InterviewDateRequest(BaseModel):
+    interview_date: str  # ISO date string YYYY-MM-DD
+
+
+@router.post("/interview-date")
+async def set_interview_date(req: InterviewDateRequest, authorization: str = Header(...)):
+    """Save the user's interview date for countdown and pace planning."""
+    uid, is_demo, token = await _resolve_token(authorization)
+    try:
+        target = datetime.fromisoformat(req.interview_date)
+    except ValueError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+    if is_demo:
+        profile = demo_store.get_profile(token)
+        profile["interviewDate"] = req.interview_date
+    else:
+        from services.firestore import get_db
+        get_db().collection("users").document(uid).set(
+            {"interviewDate": req.interview_date}, merge=True
+        )
+
+    return {"saved": True, "interview_date": req.interview_date}
+
+
+@router.get("/countdown")
+async def get_countdown(authorization: str = Header(...)):
+    """
+    Returns days remaining, pace prediction, and daily time needed.
+    Requires interviewDate to be set via POST /user/interview-date.
+    """
+    model, profile, token, is_demo = await _load(authorization)
+    interview_date_str = profile.get("interviewDate")
+    if not interview_date_str:
+        return {"has_date": False}
+
+    try:
+        target = datetime.fromisoformat(interview_date_str).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return {"has_date": False}
+
+    now = datetime.now(timezone.utc)
+    days_remaining = max(0, (target - now).days)
+
+    topics = model.get("topics", {})
+    total_topics = len(topics)
+    mastered = sum(1 for v in topics.values() if v.get("mastery", v.get("knowledge", 0)) >= 0.5)
+    uncovered = total_topics - mastered
+
+    # Mastery velocity: topics mastered in last 7 days (from events or estimate from session count)
+    events = demo_store.list_events(token, limit=200) if is_demo else []
+    cutoff = now.timestamp() - 7 * 86400
+    recent_topics_mastered: set[str] = set()
+    for e in events:
+        ts_str = e.get("ts", "")
+        if not ts_str:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_str).timestamp()
+        except Exception:
+            continue
+        if ts >= cutoff and e.get("correct") and e.get("topic"):
+            recent_topics_mastered.add(e["topic"])
+
+    velocity_per_day = len(recent_topics_mastered) / 7  # topics per day
+
+    if velocity_per_day > 0 and days_remaining > 0:
+        projected_covered = mastered + velocity_per_day * days_remaining
+        projected_covered = min(projected_covered, total_topics)
+    else:
+        projected_covered = mastered
+
+    daily_goal_min = int(profile.get("dailyGoalMinutes", 30))
+    avg_min_per_topic = 45  # heuristic: 45 min to meaningfully advance a topic
+
+    if days_remaining > 0 and uncovered > 0:
+        if velocity_per_day > 0:
+            days_to_cover_all = uncovered / velocity_per_day
+            min_needed_per_day = round(daily_goal_min * (days_to_cover_all / days_remaining))
+        else:
+            min_needed_per_day = round(uncovered * avg_min_per_topic / max(days_remaining, 1))
+    else:
+        min_needed_per_day = daily_goal_min
+
+    on_track = projected_covered >= total_topics * 0.85
+
+    return {
+        "has_date": True,
+        "interview_date": interview_date_str,
+        "days_remaining": days_remaining,
+        "total_topics": total_topics,
+        "mastered": mastered,
+        "uncovered": uncovered,
+        "projected_covered": round(projected_covered),
+        "velocity_per_day": round(velocity_per_day, 2),
+        "daily_goal_min": daily_goal_min,
+        "min_needed_per_day": min_needed_per_day,
+        "on_track": on_track,
+    }

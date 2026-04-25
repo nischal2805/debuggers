@@ -11,6 +11,7 @@ import Solve from './pages/Solve'
 import Roadmap from './pages/Roadmap'
 import Profile from './pages/Profile'
 import JudgeDashboard from './pages/JudgeDashboard'
+import Interview from './pages/Interview'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
@@ -85,6 +86,11 @@ export default function App() {
         <Route path="/judge" element={
           <ProtectedRoute requireOnboarded>
             <JudgeDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/interview/:topicId" element={
+          <ProtectedRoute requireOnboarded>
+            <Interview />
           </ProtectedRoute>
         } />
         <Route path="*" element={<Navigate to="/" replace />} />
