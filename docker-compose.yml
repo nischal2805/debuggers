@@ -28,22 +28,21 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:80,http://localhost}
       LLM_PROVIDER: ${LLM_PROVIDER:-bedrock}
       DEMO_MODE: ${DEMO_MODE:-false}
-      # Piston runs in Docker network — backend auto-installs runtimes on startup
       PISTON_URL: http://piston:2000
-      # Judge0 cloud fallback if Piston unavailable
       JUDGE0_URL: ${JUDGE0_URL:-https://ce.judge0.com}
     ports:
       - "8000:8000"
     expose:
       - "8000"
     depends_on:
-      - piston
+      piston:
+        condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 5s
     networks:
       - neuraldsa
 

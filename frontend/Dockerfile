@@ -1,5 +1,5 @@
 # Stage 1: build
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 
 # Build-time env vars (Vite bakes these in at build, not runtime)
@@ -16,7 +16,7 @@ ENV VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
 ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
 
 COPY package*.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
 COPY . .
 RUN npm run build
 

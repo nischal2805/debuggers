@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
 import { auth } from '../firebase'
 import { useStore } from '../store/useStore'
 import CodeEditor from '../components/CodeEditor'
@@ -125,8 +124,8 @@ export default function Interview() {
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current) }, [])
 
-  const onCodeChange = useCallback((val: string) => {
-    setCode(val)
+  const onCodeChange = useCallback((val: string | undefined) => {
+    setCode(val || '')
     if (!firstKeystrokeRef.current && startTimeRef.current) {
       firstKeystrokeRef.current = true
       setFirstKeystrokeMs(Date.now() - startTimeRef.current)
@@ -147,7 +146,7 @@ export default function Interview() {
     setTestResults(data.results ?? [])
   }, [problem, language, code, isDemoMode, demoToken])
 
-  const handleSubmit = useCallback(async (timesUp = false) => {
+  const handleSubmit = useCallback(async (_timesUp = false) => {
     if (!problem || phase === 'submitting') return
     if (timerRef.current) clearInterval(timerRef.current)
     setPhase('submitting')
