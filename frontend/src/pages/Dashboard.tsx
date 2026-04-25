@@ -35,6 +35,7 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [recommended, setRecommended] = useState<string | null>(null)
   const [roadmap, setRoadmap] = useState<string[]>([])
+  const [sessionDates, setSessionDates] = useState<string[]>([])
   const [useProgressiveGraph, setUseProgressiveGraph] = useState(false)
 
   // Fetch roadmap from backend (authoritative)
@@ -73,6 +74,27 @@ export default function Dashboard() {
         })
     })
   }, [user, model])
+
+  // Fetch session dates for heatmap
+  useEffect(() => {
+    if (!user) return
+    const { isDemoMode, demoToken } = useStore.getState()
+    const tokenPromise = isDemoMode && demoToken
+      ? Promise.resolve(demoToken)
+      : auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
+    tokenPromise.then(token => {
+      if (!token) return
+      fetch(`${BACKEND_URL}/user/sessions`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(data => {
+          const dates = (data.sessions ?? []).map((s: any) =>
+            typeof s.startedAt === 'string' ? s.startedAt.slice(0, 10) : ''
+          ).filter(Boolean)
+          setSessionDates(dates)
+        })
+        .catch(() => {})
+    })
+  }, [user])
 
   const masteryMap = useMemo(() => {
     if (!model) return {}
@@ -291,7 +313,7 @@ export default function Dashboard() {
           </div>
 
           <div className="p-5">
-            <SessionHeatmap sessionDates={[]} />
+            <SessionHeatmap sessionDates={sessionDates} />
             <div className="mt-4 flex gap-4">
               <div>
                 <div className="font-display text-xl font-bold text-text-primary">{model.sessionCount}</div>

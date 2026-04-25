@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,52 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _firebase_enabled = False
+
+
+async def _init_piston():
+    """Install Piston runtimes if PISTON_URL is set. Runs once at startup."""
+    piston_url = os.environ.get("PISTON_URL", "").rstrip("/")
+    if not piston_url:
+        return
+
+    import httpx
+    runtimes = [
+        {"language": "python", "version": "3.10.0"},
+        {"language": "javascript", "version": "18.15.0"},
+        {"language": "java", "version": "18.0.2.1"},
+        {"language": "cpp", "version": "11.2.0"},
+        {"language": "go", "version": "1.21.0"},
+    ]
+
+    # Wait for Piston to be ready (up to 60s)
+    print("Piston URL detected — waiting for Piston to be ready...")
+    for attempt in range(20):
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                r = await c.get(f"{piston_url}/api/v2/runtimes")
+                if r.status_code == 200:
+                    installed = {rt["language"] for rt in r.json()}
+                    print(f"Piston ready. Installed runtimes: {installed}")
+                    # Install missing runtimes
+                    for rt in runtimes:
+                        if rt["language"] not in installed:
+                            print(f"Installing Piston runtime: {rt['language']} {rt['version']}...")
+                            try:
+                                ir = await c.post(
+                                    f"{piston_url}/api/v2/packages",
+                                    json=rt,
+                                    timeout=120,
+                                )
+                                print(f"  -> {rt['language']}: {ir.status_code}")
+                            except Exception as e:
+                                print(f"  -> {rt['language']} install failed: {e}")
+                    return
+        except Exception:
+            pass
+        await asyncio.sleep(3)
+        print(f"Waiting for Piston... ({attempt + 1}/20)")
+
+    print("Piston not ready after 60s — will fall back to Judge0 cloud.")
 
 
 @asynccontextmanager
@@ -34,6 +81,9 @@ async def lifespan(app: FastAPI):
             print(f"Firebase Admin NOT initialized ({e}). Only demo mode available.")
     else:
         _firebase_enabled = True
+
+    # Initialize Piston runtimes in background (don't block startup)
+    asyncio.create_task(_init_piston())
 
     yield
 

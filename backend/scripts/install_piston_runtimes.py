@@ -9,6 +9,9 @@ PISTON_URL = "http://localhost:2000"
 RUNTIMES = [
     {"language": "python",     "version": "3.10.0"},
     {"language": "javascript", "version": "18.15.0"},
+    {"language": "java",       "version": "18.0.2.1"},
+    {"language": "cpp",        "version": "11.2.0"},
+    {"language": "go",         "version": "1.21.0"},
 ]
 
 def wait_for_piston(retries=10):

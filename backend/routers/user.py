@@ -146,10 +146,24 @@ async def get_priority_queue(authorization: str = Header(...)):
 
 @router.get("/sessions")
 async def get_sessions(authorization: str = Header(...)):
-    """List recent session report cards. Demo mode returns empty list (no Firestore)."""
-    uid, is_demo, _token = await _resolve_token(authorization)
+    uid, is_demo, token = await _resolve_token(authorization)
     if is_demo:
-        return {"sessions": []}
+        # Derive session dates from solve/judge submit events in demo store
+        events = demo_store.list_events(token, limit=200)
+        seen_dates: set[str] = set()
+        rows = []
+        for e in reversed(events):
+            if e.get("kind") in ("solve_submit", "judge_submit"):
+                ts = e.get("ts", "")
+                date = ts[:10]  # YYYY-MM-DD
+                if date and date not in seen_dates:
+                    seen_dates.add(date)
+                    rows.append({
+                        "startedAt": ts,
+                        "topic": e.get("topic", ""),
+                        "correct": e.get("correct", False),
+                    })
+        return {"sessions": rows[:30]}
     from services.firestore import get_db
     db = get_db()
     snaps = (

@@ -102,6 +102,16 @@ def _normalize_evaluation_payload(value: dict | None) -> dict | None:
     else:
         optimality = None
 
+    approach_quality = value.get("approach_quality")
+    try:
+        approach_quality = max(0.0, min(1.0, float(approach_quality))) if approach_quality is not None else None
+    except Exception:
+        approach_quality = None
+
+    mastery_signal = value.get("mastery_signal")
+    if mastery_signal not in ("improve", "maintain", "decay"):
+        mastery_signal = None
+
     return {
         "correct": bool(value.get("correct", False)),
         "partial_credit": partial_credit,
@@ -110,6 +120,9 @@ def _normalize_evaluation_payload(value: dict | None) -> dict | None:
         "hint_for_retry": value.get("hint_for_retry"),
         "error_fingerprint": fp,
         "optimality_score": optimality,
+        "approach_quality": approach_quality,
+        "mastery_signal": mastery_signal,
+        "behavioral_notes": value.get("behavioral_notes") or [],
     }
 
 
@@ -408,6 +421,90 @@ class BedrockProvider(LLMProvider):
             yield text
 
 
+class MiniMaxBedrockProvider(LLMProvider):
+    """
+    MiniMax M2.5 via AWS Bedrock Converse API.
+    Uses the unified Converse API (model-agnostic — no Anthropic-specific body format).
+    Model ID: minimax.minimax-m2.5
+    """
+    name = "minimax"
+
+    def __init__(self, model_id: Optional[str] = None) -> None:
+        self.model_id = model_id or os.environ.get("BEDROCK_MODEL_ID", "minimax.minimax-m2.5")
+        self.region = os.environ.get("AWS_REGION", "us-east-1")
+        try:
+            import boto3
+            self._client = boto3.client(
+                "bedrock-runtime",
+                region_name=self.region,
+                aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+                aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+            )
+        except Exception as e:
+            raise RuntimeError(f"boto3 not installed or AWS credentials missing: {e}")
+
+    def _converse_kwargs(self, prompt: str, system: Optional[str], max_tokens: int, temperature: float) -> dict:
+        return {
+            "modelId": self.model_id,
+            "system": [{"text": system or "Return only valid JSON."}],
+            "messages": [{"role": "user", "content": [{"text": prompt}]}],
+            "inferenceConfig": {
+                "maxTokens": max_tokens,
+                "temperature": temperature,
+            },
+        }
+
+    @staticmethod
+    def _extract_text(content: list) -> str:
+        # MiniMax is a reasoning model — content has reasoningContent blocks + text blocks.
+        # Pick only direct text blocks, skip reasoning.
+        parts = [b["text"] for b in content if "text" in b]
+        return "".join(parts).strip()
+
+    async def complete_json(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 600,
+        temperature: float = 0.2,
+        system: Optional[str] = None,
+    ) -> str:
+        import asyncio
+        kwargs = self._converse_kwargs(prompt, system, max_tokens, temperature)
+
+        def _invoke():
+            resp = self._client.converse(**kwargs)
+            return self._extract_text(resp["output"]["message"]["content"])
+
+        return await asyncio.get_event_loop().run_in_executor(None, _invoke)
+
+    async def stream_json(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 800,
+        temperature: float = 0.35,
+        system: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        import asyncio
+        kwargs = self._converse_kwargs(prompt, system, max_tokens, temperature)
+
+        def _invoke_stream():
+            resp = self._client.converse_stream(**kwargs)
+            chunks = []
+            for event in resp["stream"]:
+                delta = event.get("contentBlockDelta", {}).get("delta", {})
+                text = delta.get("text", "")
+                if text:
+                    chunks.append(text)
+            return chunks
+
+        texts = await asyncio.get_event_loop().run_in_executor(None, _invoke_stream)
+        for text in texts:
+            yield text
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Provider factory
 # ─────────────────────────────────────────────────────────────────────────────
@@ -427,7 +524,9 @@ def get_provider() -> LLMProvider:
         return _provider
     name = (os.environ.get("LLM_PROVIDER", "gemini") or "gemini").strip().lower()
     try:
-        if name == "bedrock":
+        if name == "minimax":
+            _provider = MiniMaxBedrockProvider()
+        elif name == "bedrock":
             _provider = BedrockProvider()
         elif name == "claude":
             _provider = ClaudeProvider()

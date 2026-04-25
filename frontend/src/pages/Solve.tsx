@@ -8,6 +8,7 @@ import ProblemPanel from '../components/ProblemPanel'
 import TestCasePanel from '../components/TestCasePanel'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+const SUPPORTED_LANGUAGES = ['python', 'javascript']
 
 async function getToken(isDemoMode: boolean, demoToken: string | null): Promise<string | null> {
   if (isDemoMode && demoToken) return demoToken
@@ -336,7 +337,7 @@ export default function Solve() {
             onChange={e => setLanguage(e.target.value as 'python' | 'javascript')}
             className="font-body text-xs bg-bg-elevated border border-border rounded px-2 py-1 text-text-primary focus:outline-none"
           >
-            {problem.languages.map(l => <option key={l} value={l}>{l}</option>)}
+            {problem.languages.filter(l => SUPPORTED_LANGUAGES.includes(l)).map(l => <option key={l} value={l}>{l}</option>)}
           </select>
 
           {/* Run button */}

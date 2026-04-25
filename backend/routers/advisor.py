@@ -84,10 +84,13 @@ async def advisor_chat(req: AdvisorChatRequest, authorization: str = Header(...)
 
     provider = get_provider()
     try:
-        result = await provider.complete_json(
+        raw = await provider.complete_json(
             system="You are the NeuralDSA learning advisor. Return only valid JSON.",
             prompt=prompt,
         )
+        result = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(result, dict):
+            raise ValueError("Non-dict response")
     except Exception as e:
         return {
             "response": "I couldn't process that right now. Try asking again.",
@@ -98,6 +101,6 @@ async def advisor_chat(req: AdvisorChatRequest, authorization: str = Header(...)
 
     return {
         "response": result.get("response", ""),
-        "suggested_topics": result.get("suggested_topics", []),
-        "suggested_problems": result.get("suggested_problems", []),
+        "suggested_topics": result.get("suggested_topics", []) or [],
+        "suggested_problems": result.get("suggested_problems", []) or [],
     }

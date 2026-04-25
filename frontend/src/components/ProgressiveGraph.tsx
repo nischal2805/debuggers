@@ -153,11 +153,19 @@ export default function ProgressiveGraph({ model }: ProgressiveGraphProps) {
       const key = Object.keys(DOMAIN_NODES)[i]
       const domain = DOMAIN_NODES[key]
 
+      // Aggregate mastery from children topics in real model
+      const childMasteries = domain.children
+        .map(cid => model?.topics?.[cid]?.mastery ?? null)
+        .filter((m): m is number => m !== null)
+      const domainMastery = childMasteries.length > 0
+        ? childMasteries.reduce((a, b) => a + b, 0) / childMasteries.length
+        : (model?.topics?.[key]?.mastery ?? domain.mastery)
+
       nodes.push({
         id: key,
         data: {
           label: domain.name,
-          mastery: model?.topics?.[key]?.mastery ?? domain.mastery,
+          mastery: domainMastery,
           isExpanded: expandedNodes.has(key),
           onToggle: () => toggleNode(key),
           hasChildren: domain.children.length > 0,
