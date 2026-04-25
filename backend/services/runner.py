@@ -1,37 +1,49 @@
 """
-Local subprocess code runner — replaces Piston (which went whitelist-only 2/15/2026).
+Judge0 cloud code execution runner.
+https://judge0.com — free public instance, no key needed for demo.
 
-Runs code in a subprocess with a hard timeout. Supports Python and JavaScript (Node).
-Safe enough for a hackathon demo. stdin is passed as a string, stdout is captured.
+Set JUDGE0_URL in .env. If you have a RapidAPI key set JUDGE0_API_KEY.
+Supports Python, JavaScript, C++, Java, C, Go.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-import shutil
-import sys
-import tempfile
+import time
 from typing import Optional
 
+import httpx
 
-TIMEOUT_S = float(os.environ.get("RUNNER_TIMEOUT_S", "8"))
+JUDGE0_URL = os.environ.get("JUDGE0_URL", "https://ce.judge0.com")
+JUDGE0_API_KEY = os.environ.get("JUDGE0_API_KEY", "")
+TIMEOUT_S = float(os.environ.get("RUNNER_TIMEOUT_S", "10"))
 
-# Map language key → (command, file extension)
-_RUNTIMES: dict[str, tuple[list[str], str]] = {
-    "python": (["python", "-u"], ".py"),
-    "javascript": (["node"], ".js"),
-    "java": (["java"], ".java"),         # requires javac separately — skipped for demo
+# Judge0 language IDs  https://ce.judge0.com/languages
+_LANG_IDS: dict[str, int] = {
+    "python":     71,   # Python 3.8.1
+    "javascript": 63,   # Node.js 12.14.0
+    "cpp":        54,   # C++ (GCC 9.2.0)
+    "java":       62,   # Java (OpenJDK 13.0.1)
+    "c":          50,   # C (GCC 9.2.0)
+    "go":         60,   # Go 1.13.5
 }
 
-# Detect available runtimes at startup
-_AVAILABLE: dict[str, bool] = {}
-for lang, (cmd, _) in _RUNTIMES.items():
-    _AVAILABLE[lang] = shutil.which(cmd[0]) is not None
+# Languages that have starter code in problems
+_AVAILABLE = ["python", "javascript"]
 
 
 def available_languages() -> list[str]:
-    return [lang for lang, ok in _AVAILABLE.items() if ok]
+    return _AVAILABLE
+
+
+def _headers() -> dict:
+    h = {"Content-Type": "application/json"}
+    if JUDGE0_API_KEY:
+        # RapidAPI hosted Judge0
+        h["X-RapidAPI-Key"] = JUDGE0_API_KEY
+        h["X-RapidAPI-Host"] = "judge0-ce.p.rapidapi.com"
+    return h
 
 
 async def run_code(
@@ -40,89 +52,60 @@ async def run_code(
     stdin: str,
     timeout_s: float = TIMEOUT_S,
 ) -> dict:
-    """
-    Execute `source` in `language` with `stdin` piped in.
-
-    Returns:
-      {
-        "stdout": str,
-        "stderr": str,
-        "exit_code": int,
-        "runtime_ms": int,
-        "timed_out": bool,
-        "error": str | None,   # infra error, not user code error
-      }
-    """
-    if language not in _RUNTIMES:
+    lang_id = _LANG_IDS.get(language)
+    if not lang_id:
         return _error(f"Unsupported language: {language}")
-    if not _AVAILABLE.get(language):
-        return _error(f"{language} runtime not found on this machine")
 
-    cmd_prefix, ext = _RUNTIMES[language]
+    payload = {
+        "language_id": lang_id,
+        "source_code": source,
+        "stdin": stdin,
+        "cpu_time_limit": timeout_s,
+        "memory_limit": 131072,   # 128 MB in KB
+        "wall_time_limit": timeout_s + 2,
+    }
 
-    # Write source to temp file
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=ext, delete=False, encoding="utf-8"
-    )
+    t0 = time.perf_counter()
     try:
-        tmp.write(source)
-        tmp.flush()
-        tmp.close()
-
-        cmd = cmd_prefix + [tmp.name]
-
-        import time
-        t0 = time.perf_counter()
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+        async with httpx.AsyncClient(timeout=timeout_s + 8, headers=_headers()) as client:
+            # Submit and wait in one call (?wait=true)
+            r = await client.post(
+                f"{JUDGE0_URL}/submissions",
+                json=payload,
+                params={"base64_encoded": "false", "wait": "true"},
             )
-            try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(input=stdin.encode("utf-8")),
-                    timeout=timeout_s,
-                )
-                elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                return {
-                    "stdout": stdout_b.decode("utf-8", errors="replace"),
-                    "stderr": stderr_b.decode("utf-8", errors="replace"),
-                    "exit_code": proc.returncode,
-                    "runtime_ms": elapsed_ms,
-                    "timed_out": False,
-                    "error": None,
-                }
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.communicate()
-                return {
-                    "stdout": "",
-                    "stderr": f"Time limit exceeded ({timeout_s}s)",
-                    "exit_code": -1,
-                    "runtime_ms": int(timeout_s * 1000),
-                    "timed_out": True,
-                    "error": None,
-                }
-        except Exception as e:
-            return _error(f"Failed to start process: {e}")
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
+            if r.status_code == 429:
+                return _error("Judge0 rate limit hit. Wait a moment and retry.")
+            r.raise_for_status()
+            data = r.json()
+    except httpx.ConnectError:
+        return _error("Judge0 unreachable. Check JUDGE0_URL in .env.")
+    except httpx.HTTPStatusError as e:
+        return _error(f"Judge0 error {e.response.status_code}")
+    except Exception as e:
+        return _error(f"Runner error: {e}")
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+
+    status_id = (data.get("status") or {}).get("id", 0)
+    stdout = data.get("stdout") or ""
+    stderr = data.get("stderr") or data.get("compile_output") or ""
+    timed_out = status_id == 5  # Time Limit Exceeded
+    exit_code = 0 if status_id == 3 else (1 if status_id > 3 else 0)
+
+    return {
+        "stdout": stdout,
+        "stderr": stderr[:400] if stderr else "",
+        "exit_code": exit_code,
+        "runtime_ms": int(float(data.get("time") or 0) * 1000) or elapsed_ms,
+        "timed_out": timed_out,
+        "error": None,
+    }
 
 
 def _error(msg: str) -> dict:
-    return {
-        "stdout": "",
-        "stderr": msg,
-        "exit_code": -1,
-        "runtime_ms": 0,
-        "timed_out": False,
-        "error": msg,
-    }
+    return {"stdout": "", "stderr": msg, "exit_code": -1,
+            "runtime_ms": 0, "timed_out": False, "error": msg}
 
 
 def normalize_output(text: str) -> str:

@@ -26,7 +26,7 @@ from data.coding_problems import (
     pick_problem_for_topic,
     get_next_problem,
 )
-from prompts.solve import SOLVE_EVALUATE_PROMPT, SOLVE_HINT_PROMPT
+from prompts.solve import SOLVE_EVALUATE_PROMPT, SOLVE_HINT_PROMPT, SOLVE_AGENT_PROMPT
 from services import demo_store
 from services.firestore import get_knowledge_model, save_knowledge_model, append_event
 from services.llm_client import get_provider
@@ -67,6 +67,21 @@ class HintRequest(BaseModel):
     code_so_far: str = ""
     hint_number: int = 1
     elapsed_ms: int = 0
+
+
+class AgentChatMessage(BaseModel):
+    role: str  # "user" | "agent"
+    content: str
+
+
+class AgentChatRequest(BaseModel):
+    problem_id: str
+    message: str
+    phase: str = "approach"  # "approach" | "debug" | "review"
+    code: str = ""
+    test_results: list = []
+    approach_text: str = ""
+    history: list[AgentChatMessage] = []
 
 
 # ── Auth helper ───────────────────────────────────────────────────────────────
@@ -436,6 +451,91 @@ async def evaluate_attempt(req: EvaluateRequest, authorization: str = Header(...
         "topic": p["topic"],
         "pattern": p["pattern"],
         "next_problem": _problem_response(next_p, new_mastery) if next_p else None,
+    }
+
+
+@router.post("/agent")
+async def solve_agent_chat(req: AgentChatRequest, authorization: str = Header(...)):
+    """
+    Context-aware coaching agent for the solve page.
+    - approach phase: evaluates approach text, asks probing questions
+    - debug phase: analyzes failing tests + code to pinpoint bugs
+    - review phase: post-solve quality assessment
+    1 LLM call per message. Heuristic fallback if LLM fails.
+    """
+    await _resolve_token(authorization)
+    p = get_problem(req.problem_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Problem not found")
+
+    # Build phase-specific context
+    if req.phase == "approach":
+        phase_context = f"Learner's approach so far:\n{req.approach_text or '(no approach written yet)'}"
+    elif req.phase == "debug":
+        failing = [t for t in req.test_results if not t.get("passed")][:3]
+        fail_str = "\n".join(
+            f"  input={t.get('input','?')[:60]} expected={t.get('expected','?')} got={t.get('actual','?')[:60]} stderr={t.get('stderr','')[:80]}"
+            for t in failing
+        ) or "(no failing tests)"
+        phase_context = f"Failing test cases:\n{fail_str}\n\nCurrent code:\n{req.code[:1500]}"
+    else:
+        phase_context = f"Final code submitted:\n{req.code[:1500]}"
+
+    history_text = "\n".join(
+        f"{'Learner' if m.role == 'user' else 'Agent'}: {m.content}"
+        for m in req.history[-6:]
+    ) or "(start of conversation)"
+
+    prompt = SOLVE_AGENT_PROMPT.format(
+        lc=p["lc"],
+        title=p["title"],
+        topic=p["topic"],
+        pattern=p["pattern"],
+        difficulty=p["difficulty"],
+        statement=p["statement"][:400],
+        expected_time=p["expected_complexity"]["time"],
+        expected_space=p["expected_complexity"]["space"],
+        phase=req.phase,
+        phase_context=phase_context,
+        history=history_text,
+        message=req.message,
+    )
+
+    provider = get_provider()
+    try:
+        import json as _json
+        raw = await provider.complete_json(
+            system="You are a DSA coaching agent. Return only valid JSON.",
+            prompt=prompt,
+            max_tokens=400,
+            temperature=0.3,
+        )
+        result = _json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(result, dict):
+            raise ValueError("bad response")
+    except Exception:
+        # Heuristic fallback
+        if req.phase == "approach":
+            response = "Write out your approach before coding. What data structure will you use, and what is the time complexity?"
+        elif req.phase == "debug":
+            response = f"Check the failing test cases carefully. Trace through your code with the first failing input step by step."
+        else:
+            response = f"Compare your solution's complexity against the expected {p['expected_complexity']['time']} time complexity."
+        result = {
+            "response": response,
+            "approach_score": None,
+            "approach_verdict": None,
+            "hint": None,
+            "next_focus": "Think through the problem step by step.",
+        }
+
+    return {
+        "response": result.get("response", ""),
+        "approach_score": result.get("approach_score"),
+        "approach_verdict": result.get("approach_verdict"),
+        "hint": result.get("hint"),
+        "next_focus": result.get("next_focus", ""),
+        "phase": req.phase,
     }
 
 
