@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    background: #0a0a0f;
+    color: #f0f0ff;
+    font-family: 'IBM Plex Mono', monospace;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: #12121a;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(108, 99, 255, 0.4);
+    border-radius: 2px;
+  }
+}
+
+/* React Flow overrides */
+.react-flow__background {
+  background: #0a0a0f !important;
+}
+.react-flow__edge-path {
+  stroke-width: 1.5;
+}
+.react-flow__minimap {
+  background: #12121a !important;
+  border: 1px solid rgba(108, 99, 255, 0.15) !important;
+}
+.react-flow__controls {
+  border: 1px solid rgba(108, 99, 255, 0.15) !important;
+  background: #12121a !important;
+}
+.react-flow__controls button {
+  background: #12121a !important;
+  border-bottom: 1px solid rgba(108, 99, 255, 0.15) !important;
+  color: #8888aa !important;
+}
+.react-flow__controls button:hover {
+  background: #1a1a26 !important;
+}
