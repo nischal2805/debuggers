@@ -1,9 +1,40 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { motion, AnimatePresence } from 'framer-motion'
 import { auth } from '../firebase'
 import { useStore } from '../store/useStore'
 import { useVoice } from '../hooks/useVoice'
 import CodeEditor from '../components/CodeEditor'
+import NavBar from '../components/NavBar'
+
+// Stable heights seeded by bar index to avoid Math.random() on re-renders
+const WAVE_HEIGHTS = [55, 75, 45, 90, 60, 80, 40, 70, 85, 50, 65, 95, 45, 75, 55, 85, 60, 70, 50, 80]
+
+// ── Waveform bars component ───────────────────────────────────────────────────
+function VoiceWaveform({ active, bars = 20 }: { active: boolean; bars?: number }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 28 }}>
+      {Array.from({ length: bars }).map((_, i) => (
+        <div
+          key={i}
+          style={{
+            width: 3,
+            height: active ? `${WAVE_HEIGHTS[i % WAVE_HEIGHTS.length]}%` : '15%',
+            background: active
+              ? `hsl(${220 + i * 6}, 80%, 62%)`
+              : 'rgba(136,136,170,0.25)',
+            borderRadius: 2,
+            transition: active ? undefined : 'height 0.3s ease, background 0.3s ease',
+            animation: active
+              ? `voiceWave ${0.38 + (i % 5) * 0.11}s ease-in-out infinite alternate`
+              : undefined,
+            animationDelay: active ? `${i * 0.035}s` : undefined,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
@@ -303,8 +334,11 @@ export default function Interview() {
 
   if (phase === 'loading') {
     return (
-      <div className="min-h-screen bg-bg-primary flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-bg-primary flex flex-col">
+        <NavBar active="/interview" interviewTopic={topicId} />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-6 h-6 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
+        </div>
       </div>
     )
   }
@@ -312,7 +346,9 @@ export default function Interview() {
   if (phase === 'briefing') {
     const ready = readyInfo?.ready ?? false
     return (
-      <div className="min-h-screen bg-bg-primary flex items-center justify-center px-6">
+      <div className="min-h-screen bg-bg-primary flex flex-col">
+        <NavBar active="/interview" interviewTopic={topicId} />
+        <div className="flex-1 flex items-center justify-center px-6">
         <div className="w-full max-w-lg">
           <div className="mb-8">
             <div className="font-body text-accent-secondary text-xs uppercase tracking-widest mb-2">Interview Mode</div>
@@ -322,17 +358,20 @@ export default function Interview() {
 
           {error && <div className="mb-6 p-3 bg-accent-danger/10 border border-accent-danger/30 rounded font-body text-accent-danger text-sm">{error}</div>}
 
-          <div className="p-5 bg-bg-surface border border-border rounded-lg mb-6">
+          <div className="p-5 bg-bg-surface border border-border rounded-2xl mb-6 overflow-hidden" style={{ borderTop: `2px solid ${readyInfo?.ready ? '#00e676' : '#ffb300'}80` }}>
             <div className="flex items-center justify-between mb-3">
               <span className="font-body text-text-secondary text-xs uppercase tracking-wider">Readiness</span>
-              <span className="font-display text-lg font-bold" style={{ color: ready ? '#00e676' : '#ffb300' }}>
+              <span className="font-display text-lg font-bold" style={{ color: readyInfo?.ready ? '#00e676' : '#ffb300' }}>
                 {Math.round((readyInfo?.mastery ?? 0) * 100)}%
               </span>
             </div>
-            <div className="w-full h-1.5 bg-bg-elevated rounded-full mb-3">
-              <div
-                className="h-full rounded-full transition-all"
-                style={{ width: `${(readyInfo?.mastery ?? 0) * 100}%`, background: ready ? '#00e676' : '#ffb300' }}
+            <div className="w-full h-2 bg-bg-elevated rounded-full mb-3 overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${(readyInfo?.mastery ?? 0) * 100}%` }}
+                transition={{ duration: 0.8, ease: 'easeOut' }}
+                className="h-full rounded-full"
+                style={{ background: readyInfo?.ready ? '#00e676' : '#ffb300', boxShadow: `0 0 8px ${readyInfo?.ready ? '#00e676' : '#ffb300'}60` }}
               />
             </div>
             <p className="font-body text-text-secondary text-xs">{readyInfo?.reason ?? 'Checking readiness...'}</p>
@@ -359,12 +398,16 @@ export default function Interview() {
                   </div>
                 ))}
               </div>
-              <button
+              <motion.button
+                whileHover={{ scale: 1.02, boxShadow: '0 6px 20px rgba(255,71,87,0.4)' }}
+                whileTap={{ scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 420, damping: 26 }}
                 onClick={enterCoding}
-                className="w-full py-3 bg-accent-danger hover:bg-accent-danger/90 text-white font-display font-bold rounded-lg transition-colors"
+                className="w-full py-3 text-white font-display font-bold rounded-xl transition-all"
+                style={{ background: 'linear-gradient(135deg, #ff4757, #d63040)', boxShadow: '0 4px 16px rgba(255,71,87,0.3)' }}
               >
                 Enter Interview
-              </button>
+              </motion.button>
             </>
           ) : (
             <div className="space-y-3">
@@ -378,6 +421,7 @@ export default function Interview() {
             Back
           </button>
         </div>
+        </div>
       </div>
     )
   }
@@ -385,7 +429,9 @@ export default function Interview() {
   if (phase === 'debrief' && debrief) {
     const verdictColor = VERDICT_COLORS[debrief.verdict] ?? '#8888aa'
     return (
-      <div className="min-h-screen bg-bg-primary overflow-y-auto px-6 py-12">
+      <div className="min-h-screen bg-bg-primary flex flex-col">
+        <NavBar active="/interview" interviewTopic={topicId} />
+        <div className="flex-1 overflow-y-auto px-6 py-10">
         <div className="max-w-2xl mx-auto">
           <div className="mb-8 text-center">
             <div className="font-body text-text-secondary text-xs uppercase tracking-widest mb-2">Interview Complete</div>
@@ -496,13 +542,24 @@ export default function Interview() {
           </div>
 
           <div className="mt-8 flex gap-3">
-            <button onClick={() => navigate('/dashboard')} className="flex-1 py-3 bg-bg-surface border border-border font-body text-sm text-text-secondary hover:text-text-primary rounded-lg transition-colors">
+            <motion.button
+              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+              onClick={() => navigate('/dashboard')}
+              className="flex-1 py-3 bg-bg-surface border border-border font-body text-sm text-text-secondary hover:text-text-primary rounded-xl transition-all hover:border-accent-primary/30"
+            >
               Dashboard
-            </button>
-            <button onClick={() => navigate(`/solve/${topicId}`)} className="flex-1 py-3 bg-accent-primary hover:bg-accent-primary/90 text-white font-body text-sm font-medium rounded-lg transition-colors">
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.03, boxShadow: '0 6px 20px rgba(108,99,255,0.35)' }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => navigate(`/solve/${topicId}`)}
+              className="flex-1 py-3 text-white font-body text-sm font-medium rounded-xl transition-all"
+              style={{ background: 'linear-gradient(135deg, #6c63ff, #5a54d4)', boxShadow: '0 4px 14px rgba(108,99,255,0.25)' }}
+            >
               Keep Practicing
-            </button>
+            </motion.button>
           </div>
+        </div>
         </div>
       </div>
     )
@@ -511,10 +568,12 @@ export default function Interview() {
   // Coding phase
   return (
     <div className="h-screen bg-bg-primary flex flex-col overflow-hidden">
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-bg-surface border-b border-border flex-shrink-0">
+      {/* Top bar — slim focus mode, no full NavBar */}
+      <div className="flex items-center justify-between px-4 py-2 bg-bg-surface border-b border-border flex-shrink-0" style={{ borderTop: '2px solid rgba(255,71,87,0.5)' }}>
         <div className="flex items-center gap-3">
-          <span className="font-body text-accent-secondary text-xs uppercase tracking-widest">Interview</span>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ff4757', boxShadow: '0 0 6px #ff475780', animation: 'pulse 2s infinite' }} />
+          <span className="font-body text-accent-danger text-xs uppercase tracking-widest font-semibold">Interview</span>
+          <span className="font-body text-text-secondary text-xs">|</span>
           <span className="font-display text-text-primary text-sm font-bold">{problem?.title}</span>
         </div>
         <div className="flex items-center gap-4">
@@ -608,104 +667,271 @@ export default function Interview() {
         </div>
 
         {/* Right: Interviewer Chat Panel */}
-        <div className="w-80 border-l border-border flex flex-col flex-shrink-0 bg-bg-surface">
-          <div className="px-4 py-2.5 border-b border-border flex-shrink-0">
-            <span className="font-body text-accent-secondary text-xs uppercase tracking-widest">Interviewer</span>
-          </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
-            {interviewHistory.length === 0 && (
-              <p className="font-body text-text-secondary text-xs text-center mt-6 opacity-50">Interview starting...</p>
-            )}
-            {interviewHistory.map((msg, i) => (
-              <div key={i} className={`flex flex-col gap-0.5 ${msg.role === 'candidate' ? 'items-end' : 'items-start'}`}>
-                <span className="font-body text-xs text-text-secondary opacity-60 px-1">
-                  {msg.role === 'interviewer' ? 'Interviewer' : 'You'}
-                </span>
-                <div className={`max-w-[92%] px-3 py-2 rounded-lg font-body text-xs leading-relaxed ${
-                  msg.role === 'interviewer'
-                    ? 'bg-bg-elevated border border-border/60 text-text-primary'
-                    : 'bg-accent-primary/15 border border-accent-primary/25 text-text-primary'
-                }`}>{msg.content}</div>
-              </div>
-            ))}
-            {chatLoading && (
-              <div className="flex items-start">
-                <div className="px-3 py-2 bg-bg-elevated border border-border/60 rounded-lg flex gap-1">
-                  <span className="w-1.5 h-1.5 bg-text-secondary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 bg-text-secondary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 bg-text-secondary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+        <div className="w-80 border-l border-border flex flex-col flex-shrink-0 bg-bg-surface" style={{ borderTop: '2px solid rgba(255,71,87,0.4)' }}>
+          {/* Panel header */}
+          <div className="px-4 py-2.5 border-b border-border flex-shrink-0 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-accent-danger" style={{ boxShadow: '0 0 6px #ff475780', animation: 'pulse 2s infinite' }} />
+              <span className="font-body text-accent-secondary text-xs uppercase tracking-widest">Interviewer</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* TTS status */}
+              {ttsLoading && !voiceMuted && (
+                <div className="flex items-center gap-1">
+                  <VoiceWaveform active bars={8} />
                 </div>
-              </div>
-            )}
-            <div ref={chatBottomRef} />
-          </div>
-          {/* Interviewer chat input */}
-          <div className="p-3 border-t border-border flex-shrink-0">
-            <div className="flex gap-2 items-center">
-              {/* Mic button */}
+              )}
+              {/* Mute toggle */}
               <button
-                onMouseDown={startRecording}
-                onMouseUp={async () => {
-                  const t = await stopRecording()
-                  if (t) setChatInput(prev => prev ? prev + ' ' + t : t)
+                onClick={() => { setVoiceMuted(m => !m); if (!voiceMuted) stopSpeaking() }}
+                title={voiceMuted ? 'Unmute' : 'Mute interviewer'}
+                style={{
+                  width: 28, height: 28, borderRadius: '50%',
+                  background: 'var(--bg-elevated)',
+                  border: `1px solid ${voiceMuted ? 'rgba(136,136,170,0.2)' : 'rgba(0,212,255,0.4)'}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', transition: 'border-color 0.2s',
                 }}
-                onTouchStart={startRecording}
-                onTouchEnd={async () => {
-                  const t = await stopRecording()
-                  if (t) setChatInput(prev => prev ? prev + ' ' + t : t)
-                }}
-                disabled={sttLoading}
-                title={isRecording ? 'Recording… release to transcribe' : 'Hold to speak'}
-                className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-                  isRecording
-                    ? 'bg-accent-danger animate-pulse'
-                    : sttLoading
-                    ? 'bg-accent-warn/30 cursor-wait'
-                    : 'bg-bg-elevated border border-border hover:border-accent-secondary'
-                }`}
               >
-                {sttLoading ? (
-                  <div className="w-3 h-3 border border-accent-warn border-t-transparent rounded-full animate-spin" />
+                {voiceMuted ? (
+                  <svg width="13" height="13" fill="rgba(136,136,170,0.4)" viewBox="0 0 24 24">
+                    <path d="M16.5 12A4.5 4.5 0 0014 7.97v1.79l2.48 2.48c.01-.08.02-.16.02-.24zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06A8.99 8.99 0 0017.73 18l2 2L21 18.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                  </svg>
                 ) : (
-                  <svg className={`w-3.5 h-3.5 ${isRecording ? 'text-white' : 'text-text-secondary'}`} fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 14a3 3 0 003-3V5a3 3 0 00-6 0v6a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 0014 0h-2zM11 19.93V22h2v-2.07A8.001 8.001 0 0019 13h-2a6 6 0 01-12 0H3a8.001 8.001 0 008 6.93z"/>
+                  <svg width="13" height="13" fill="#00d4ff" viewBox="0 0 24 24">
+                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
                   </svg>
                 )}
               </button>
+            </div>
+          </div>
 
+          {/* Chat messages */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            <AnimatePresence>
+              {interviewHistory.length === 0 && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 0.4 }}
+                  className="font-body text-text-secondary text-xs text-center mt-8"
+                >
+                  Interview starting...
+                </motion.p>
+              )}
+              {interviewHistory.map((msg, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 8, x: msg.role === 'candidate' ? 8 : -8 }}
+                  animate={{ opacity: 1, y: 0, x: 0 }}
+                  transition={{ duration: 0.25, ease: 'easeOut' }}
+                  className={`flex flex-col gap-0.5 ${msg.role === 'candidate' ? 'items-end' : 'items-start'}`}
+                >
+                  <span className="font-body text-[10px] text-text-secondary opacity-50 px-1">
+                    {msg.role === 'interviewer' ? 'Interviewer' : 'You'}
+                  </span>
+                  <div
+                    style={{
+                      maxWidth: '90%',
+                      padding: '8px 12px',
+                      borderRadius: msg.role === 'interviewer' ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
+                      fontFamily: 'IBM Plex Mono, monospace',
+                      fontSize: 11,
+                      lineHeight: 1.55,
+                      background: msg.role === 'interviewer'
+                        ? 'var(--bg-elevated)'
+                        : 'rgba(108,99,255,0.12)',
+                      border: msg.role === 'interviewer'
+                        ? '1px solid rgba(108,99,255,0.12)'
+                        : '1px solid rgba(108,99,255,0.3)',
+                      color: 'var(--text-primary)',
+                      borderLeft: msg.role === 'interviewer' ? '2px solid rgba(255,71,87,0.5)' : undefined,
+                    }}
+                  >
+                    {msg.content}
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+
+            {chatLoading && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-start"
+              >
+                <div style={{
+                  padding: '10px 14px',
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid rgba(108,99,255,0.12)',
+                  borderLeft: '2px solid rgba(255,71,87,0.5)',
+                  borderRadius: '4px 12px 12px 12px',
+                  display: 'flex', gap: 5, alignItems: 'center',
+                }}>
+                  {[0, 150, 300].map(d => (
+                    <span
+                      key={d}
+                      style={{
+                        width: 5, height: 5, borderRadius: '50%',
+                        background: 'var(--text-secondary)',
+                        display: 'inline-block',
+                        animation: `bounce 1s ease infinite`,
+                        animationDelay: `${d}ms`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </motion.div>
+            )}
+            <div ref={chatBottomRef} />
+          </div>
+
+          {/* Voice input area */}
+          <div className="p-3 border-t border-border flex-shrink-0" style={{ background: 'var(--bg-elevated)' }}>
+            {/* Waveform + mic button row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              {/* Animated waveform */}
+              <div style={{ flex: 1 }}>
+                <AnimatePresence>
+                  {(isRecording || sttLoading) && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                    >
+                      <VoiceWaveform active={isRecording} bars={18} />
+                    </motion.div>
+                  )}
+                  {!isRecording && !sttLoading && (
+                    <motion.p
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 0.45 }}
+                      style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 9, color: 'var(--text-secondary)', margin: 0 }}
+                    >
+                      {ttsLoading && !voiceMuted ? 'Interviewer speaking...' : 'Hold mic to respond by voice'}
+                    </motion.p>
+                  )}
+                  {sttLoading && !isRecording && (
+                    <motion.p
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 9, color: '#ffb300', margin: 0 }}
+                    >
+                      Transcribing...
+                    </motion.p>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Large mic button */}
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                {/* Pulse rings when recording */}
+                {isRecording && (
+                  <>
+                    <div style={{
+                      position: 'absolute', inset: -8, borderRadius: '50%',
+                      border: '2px solid rgba(255,71,87,0.6)',
+                      animation: 'micPulse 1s ease-out infinite',
+                    }} />
+                    <div style={{
+                      position: 'absolute', inset: -16, borderRadius: '50%',
+                      border: '1.5px solid rgba(255,71,87,0.3)',
+                      animation: 'micPulse 1s ease-out infinite',
+                      animationDelay: '0.3s',
+                    }} />
+                  </>
+                )}
+                <button
+                  onMouseDown={startRecording}
+                  onMouseUp={async () => {
+                    const t = await stopRecording()
+                    if (t) setChatInput(prev => prev ? prev + ' ' + t : t)
+                  }}
+                  onTouchStart={startRecording}
+                  onTouchEnd={async () => {
+                    const t = await stopRecording()
+                    if (t) setChatInput(prev => prev ? prev + ' ' + t : t)
+                  }}
+                  disabled={sttLoading}
+                  title={isRecording ? 'Recording — release to send' : 'Hold to speak'}
+                  style={{
+                    width: 44, height: 44, borderRadius: '50%',
+                    border: `2px solid ${isRecording ? '#ff4757' : 'rgba(0,212,255,0.35)'}`,
+                    background: isRecording
+                      ? 'rgba(255,71,87,0.18)'
+                      : sttLoading
+                      ? 'rgba(255,179,0,0.1)'
+                      : 'var(--bg-surface)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: sttLoading ? 'wait' : 'pointer',
+                    transition: 'all 0.2s ease',
+                    boxShadow: isRecording ? '0 0 16px rgba(255,71,87,0.4)' : undefined,
+                    position: 'relative',
+                    zIndex: 1,
+                  }}
+                >
+                  {sttLoading ? (
+                    <div style={{
+                      width: 14, height: 14, border: '2px solid #ffb300',
+                      borderTopColor: 'transparent', borderRadius: '50%',
+                      animation: 'spin 0.8s linear infinite',
+                    }} />
+                  ) : (
+                    <svg
+                      width="18" height="18"
+                      fill={isRecording ? '#ff4757' : '#00d4ff'}
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M12 14a3 3 0 003-3V5a3 3 0 00-6 0v6a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 0014 0h-2zM11 19.93V22h2v-2.07A8.001 8.001 0 0019 13h-2a6 6 0 01-12 0H3a8.001 8.001 0 008 6.93z"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Text input row */}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <input
                 type="text"
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat() } }}
-                placeholder={isRecording ? '🎙 Recording…' : sttLoading ? 'Transcribing…' : 'Respond to interviewer...'}
-                className="flex-1 px-3 py-2 bg-bg-elevated border border-border rounded font-body text-xs text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent-primary transition-colors"
+                placeholder={isRecording ? 'Recording...' : sttLoading ? 'Transcribing...' : 'Type or use mic above'}
+                style={{
+                  flex: 1,
+                  padding: '7px 10px',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 8,
+                  fontFamily: 'IBM Plex Mono, monospace',
+                  fontSize: 11,
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  transition: 'border-color 0.15s',
+                }}
+                onFocus={e => { e.target.style.borderColor = 'rgba(108,99,255,0.5)' }}
+                onBlur={e => { e.target.style.borderColor = 'var(--border-color)' }}
               />
-
-              {/* Speaker / mute toggle */}
-              <button
-                onClick={() => { setVoiceMuted(m => !m); if (!voiceMuted) stopSpeaking() }}
-                title={voiceMuted ? 'Unmute interviewer voice' : 'Mute interviewer voice'}
-                className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-bg-elevated border border-border hover:border-accent-secondary transition-colors"
-              >
-                {ttsLoading && !voiceMuted ? (
-                  <div className="w-3 h-3 border border-accent-secondary border-t-transparent rounded-full animate-spin" />
-                ) : voiceMuted ? (
-                  <svg className="w-3.5 h-3.5 text-text-secondary/40" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M16.5 12A4.5 4.5 0 0014 7.97v1.79l2.48 2.48c.01-.08.02-.16.02-.24zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06A8.99 8.99 0 0017.73 18l2 2L21 18.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
-                  </svg>
-                ) : (
-                  <svg className="w-3.5 h-3.5 text-accent-secondary" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-                  </svg>
-                )}
-              </button>
-
-              <button
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={handleSendChat}
                 disabled={chatLoading || !chatInput.trim()}
-                className="px-3 py-2 bg-accent-primary hover:bg-accent-primary/90 text-white font-body text-xs rounded transition-colors disabled:opacity-40 flex-shrink-0"
-              >Send</button>
+                style={{
+                  padding: '7px 14px',
+                  background: chatInput.trim() ? 'linear-gradient(135deg, #6c63ff, #5a54d4)' : 'var(--bg-surface)',
+                  border: '1px solid rgba(108,99,255,0.4)',
+                  borderRadius: 8,
+                  fontFamily: 'IBM Plex Mono, monospace',
+                  fontSize: 11,
+                  color: chatInput.trim() ? '#fff' : 'var(--text-secondary)',
+                  cursor: chatLoading || !chatInput.trim() ? 'not-allowed' : 'pointer',
+                  opacity: chatLoading || !chatInput.trim() ? 0.45 : 1,
+                  transition: 'all 0.2s',
+                  flexShrink: 0,
+                }}
+              >
+                Send
+              </motion.button>
             </div>
           </div>
         </div>

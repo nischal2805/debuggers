@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import { signOut } from 'firebase/auth'
 import { auth } from '../firebase'
+import NavBar from '../components/NavBar'
 import { useStore } from '../store/useStore'
 import { useKnowledgeModel } from '../hooks/useKnowledgeModel'
 import { TOPIC_GRAPH, getMasteryColor } from '../lib/topics'
@@ -79,12 +81,7 @@ export default function Profile() {
     })
   }, [user, isDemoMode, demoToken, setReadiness])
 
-  const sendChat = async () => {
-    const msg = chatInput.trim()
-    if (!msg || chatLoading) return
-    const newHistory: ChatMsg[] = [...chatHistory, { role: 'user', content: msg }]
-    setChatHistory(newHistory)
-    setChatInput('')
+  const sendChatMsg = async (msg: string, history: ChatMsg[]) => {
     setChatLoading(true)
     try {
       const token = await getToken(isDemoMode, demoToken)
@@ -94,16 +91,55 @@ export default function Profile() {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: msg,
-          history: chatHistory.slice(-6).map(m => ({ role: m.role, content: m.content })),
+          history: history.slice(-6).map(m => ({ role: m.role, content: m.content })),
         }),
       })
       const data = await res.json()
-      const reply = data.response || 'No response from advisor.'
-      setChatHistory(h => [...h, { role: 'assistant', content: reply }])
-    } catch (e) {
+      setChatHistory(h => [...h, { role: 'assistant', content: data.response || 'No response from advisor.' }])
+    } catch {
       setChatHistory(h => [...h, { role: 'assistant', content: 'Could not reach advisor. Make sure the backend is running.' }])
     }
     setChatLoading(false)
+  }
+
+  const sendChat = async () => {
+    const msg = chatInput.trim()
+    if (!msg || chatLoading) return
+    const newHistory: ChatMsg[] = [...chatHistory, { role: 'user', content: msg }]
+    setChatHistory(newHistory)
+    setChatInput('')
+    await sendChatMsg(msg, chatHistory)
+  }
+
+  const reviewAttempt = async (item: SolveHistoryItem) => {
+    // Build a rich review prompt with all available data
+    const outcome = item.correct ? 'solved correctly' : item.timed_out ? 'timed out' : 'failed'
+    const parts: string[] = [
+      `Review my attempt on LC ${item.lc} — "${item.title}" (topic: ${item.topic.replace(/_/g, ' ')}, pattern: ${item.pattern?.replace(/_/g, ' ') ?? 'unknown'}).`,
+      `Outcome: ${outcome}. Time: ${item.total_time_min ?? '?'} min. Hints used: ${item.hints_requested}. Runs: ${item.num_runs}.`,
+    ]
+    if (item.approach_written) parts.push('I did write down my approach before coding.')
+    else parts.push('I did NOT write an approach before coding — I jumped straight to code.')
+    if (item.mastery_delta !== 0) parts.push(`Mastery change: ${item.mastery_delta > 0 ? '+' : ''}${(item.mastery_delta * 100).toFixed(1)}%.`)
+    if (item.behavioral_insight) parts.push(`Behavioral note from the agent: "${item.behavioral_insight}".`)
+
+    // Add topic mastery context
+    const topicMastery = model?.topics?.[item.topic]?.mastery ?? 0
+    const topicAttempts = model?.topics?.[item.topic]?.attempts ?? 0
+    parts.push(`My current mastery on ${item.topic.replace(/_/g, ' ')}: ${Math.round(topicMastery * 100)}% over ${topicAttempts} attempts.`)
+
+    parts.push(
+      `Based on all of this: what did I likely do wrong? What specific concept or edge case did I miss? What should I practice next to fix the gap? Be direct and specific — not generic advice.`
+    )
+
+    const prompt = parts.join(' ')
+    const userMsg: ChatMsg = { role: 'user', content: prompt }
+    const newHistory = [...chatHistory, userMsg]
+    setChatHistory(newHistory)
+    setChatOpen(true)
+    setChatInput('')
+    setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 80)
+    await sendChatMsg(prompt, chatHistory)
   }
 
   const handleLogout = async () => {
@@ -138,43 +174,50 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen bg-bg-primary">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-border">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/dashboard')} className="text-text-secondary hover:text-text-primary transition-colors">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <span className="font-display font-bold text-text-primary">Profile</span>
-          {isDemoMode && (
-            <span className="font-body text-[10px] text-accent-warn border border-accent-warn/30 rounded px-1.5 py-0.5">demo</span>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          <button
+      <NavBar active="/profile" />
+      {/* Profile sub-header */}
+      <div className="flex items-center justify-between px-6 py-2.5 border-b border-border bg-bg-surface/60 flex-shrink-0">
+        <span className="font-display font-bold text-text-primary text-sm">Profile</span>
+        <div className="flex items-center gap-2">
+          <motion.button
+            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={() => setChatOpen(o => !o)}
-            className="font-body text-xs px-3 py-1.5 rounded border border-accent-secondary/40 text-accent-secondary hover:bg-accent-secondary/10 transition-colors"
+            className="font-body text-xs px-3 py-1.5 rounded-lg border border-accent-secondary/40 text-accent-secondary hover:bg-accent-secondary/10 transition-all"
           >
             {chatOpen ? 'close advisor' : 'ask advisor'}
-          </button>
-          <button onClick={handleLogout} className="font-body text-sm text-text-secondary hover:text-accent-danger transition-colors">
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+            onClick={handleLogout}
+            className="font-body text-xs text-text-secondary hover:text-accent-danger transition-colors px-2 py-1.5 rounded-lg hover:bg-accent-danger/5"
+          >
             {isDemoMode ? 'exit demo' : 'sign out'}
-          </button>
+          </motion.button>
         </div>
-      </header>
+      </div>
 
       <div className="max-w-5xl mx-auto px-6 py-10 space-y-8">
         {/* User header */}
         <div className="flex items-center gap-5">
           {user?.photoURL ? (
-            <img src={user.photoURL} alt="" className="w-14 h-14 rounded-full" />
+            <motion.img
+              whileHover={{ scale: 1.05, boxShadow: '0 0 20px rgba(108,99,255,0.4)' }}
+              src={user.photoURL}
+              alt=""
+              className="w-16 h-16 rounded-full border-2 border-accent-primary/40 cursor-pointer"
+              style={{ boxShadow: '0 0 12px rgba(108,99,255,0.25)' }}
+            />
           ) : (
-            <div className="w-14 h-14 rounded-full bg-accent-primary/20 border border-accent-primary/30 flex items-center justify-center text-xl font-display text-accent-primary">
-              {user?.name?.[0] ?? 'U'}
-            </div>
+            <motion.div
+              whileHover={{ scale: 1.05, boxShadow: '0 0 20px rgba(108,99,255,0.5)' }}
+              className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-display font-bold text-white cursor-default"
+              style={{ background: 'linear-gradient(135deg, #6c63ff, #00d4ff)', boxShadow: '0 0 14px rgba(108,99,255,0.35)' }}
+            >
+              {user?.name?.[0]?.toUpperCase() ?? 'U'}
+            </motion.div>
           )}
           <div>
-            <div className="font-display text-xl font-bold text-text-primary">{user?.name}</div>
+            <div className="font-display text-2xl font-bold text-text-primary">{user?.name}</div>
             <div className="font-body text-sm text-text-secondary">{user?.email}</div>
           </div>
         </div>
@@ -238,15 +281,18 @@ export default function Profile() {
                 onChange={e => setChatInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendChat()}
                 placeholder="Ask the advisor..."
-                className="flex-1 bg-bg-elevated border border-border rounded px-3 py-2 font-body text-xs text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent-primary/50"
+                className="flex-1 bg-bg-elevated border border-border rounded-lg px-3 py-2 font-body text-xs text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent-primary/50 transition-colors"
               />
-              <button
+              <motion.button
+                whileHover={{ scale: 1.05, boxShadow: '0 4px 14px rgba(108,99,255,0.35)' }}
+                whileTap={{ scale: 0.95 }}
                 onClick={sendChat}
                 disabled={!chatInput.trim() || chatLoading}
-                className="px-4 py-2 bg-accent-primary hover:bg-accent-primary/90 text-white font-body text-xs rounded transition-colors disabled:opacity-40"
+                className="px-4 py-2 text-white font-body text-xs rounded-lg transition-all disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg, #6c63ff, #5a54d4)' }}
               >
                 Send
-              </button>
+              </motion.button>
             </div>
           </div>
         )}
@@ -254,29 +300,27 @@ export default function Profile() {
         {/* Stats row */}
         {model && (
           <div className="grid grid-cols-4 gap-4">
-            <div className="bg-bg-surface border border-border rounded-lg p-5">
-              <div className="font-display text-3xl font-bold text-text-primary">{model.sessionCount}</div>
-              <div className="font-body text-xs text-text-secondary mt-1">sessions</div>
-            </div>
-            <div className="bg-bg-surface border border-border rounded-lg p-5">
-              <div className="font-display text-3xl font-bold text-text-primary">{Math.round(model.totalMinutes / 60)}h</div>
-              <div className="font-body text-xs text-text-secondary mt-1">study time</div>
-            </div>
-            <div className="bg-bg-surface border border-border rounded-lg p-5">
-              <div className="font-display text-3xl font-bold text-text-primary">
-                {Object.values(model.topics).filter(v => v.mastery > 0.85).length}
-              </div>
-              <div className="font-body text-xs text-text-secondary mt-1">mastered topics</div>
-            </div>
-            <div className="bg-bg-surface border border-border rounded-lg p-5">
-              <div
-                className="font-display text-3xl font-bold"
-                style={{ color: readiness.total >= 70 ? '#00e676' : readiness.total >= 40 ? '#ffb300' : '#ff4757' }}
+            {[
+              { value: model.sessionCount, label: 'sessions', accent: '#6c63ff' },
+              { value: `${Math.round(model.totalMinutes / 60)}h`, label: 'study time', accent: '#00d4ff' },
+              { value: Object.values(model.topics).filter(v => v.mastery > 0.85).length, label: 'mastered topics', accent: '#00e676' },
+              {
+                value: Math.round(readiness.total),
+                label: 'readiness score',
+                accent: readiness.total >= 70 ? '#00e676' : readiness.total >= 40 ? '#ffb300' : '#ff4757',
+              },
+            ].map(({ value, label, accent }) => (
+              <motion.div
+                key={label}
+                whileHover={{ y: -3, boxShadow: `0 8px 24px ${accent}25` }}
+                transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                className="bg-bg-surface border border-border rounded-xl p-5 cursor-default"
+                style={{ borderTop: `2px solid ${accent}60` }}
               >
-                {Math.round(readiness.total)}
-              </div>
-              <div className="font-body text-xs text-text-secondary mt-1">readiness score</div>
-            </div>
+                <div className="font-display text-3xl font-bold" style={{ color: accent }}>{value}</div>
+                <div className="font-body text-xs text-text-secondary mt-1">{label}</div>
+              </motion.div>
+            ))}
           </div>
         )}
 
@@ -454,16 +498,10 @@ export default function Profile() {
 
                   {/* Discuss button */}
                   <button
-                    onClick={() => {
-                      setChatOpen(true)
-                      const ctx = `I just ${item.correct ? 'solved' : 'attempted'} ${item.title}${
-                        item.behavioral_insight ? `. Notes: ${item.behavioral_insight}` : ''
-                      }. Can you give me feedback on this?`
-                      setChatInput(ctx)
-                    }}
-                    className="flex-shrink-0 font-body text-[10px] px-2 py-1 rounded border border-accent-secondary/30 text-accent-secondary hover:bg-accent-secondary/10 transition-colors"
+                    onClick={() => reviewAttempt(item)}
+                    className="flex-shrink-0 font-body text-[10px] px-2 py-1 rounded border border-accent-primary/40 text-accent-primary hover:bg-accent-primary/10 transition-colors"
                   >
-                    discuss
+                    AI review
                   </button>
                 </div>
               ))}

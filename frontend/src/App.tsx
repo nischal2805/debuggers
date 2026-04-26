@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard'
 import Session from './pages/Session'
 import Solve from './pages/Solve'
 import Profile from './pages/Profile'
+import Roadmap from './pages/Roadmap'
 import JudgeDashboard from './pages/JudgeDashboard'
 import Interview from './pages/Interview'
 import TMinusProtocol from './pages/TMinusProtocol'
@@ -16,6 +17,11 @@ import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
   const { setUser, setLoading, enterDemoMode } = useStore()
+
+  useEffect(() => {
+    const stored = localStorage.getItem('neuraldsa_theme')
+    if (stored === 'light') document.documentElement.classList.add('light')
+  }, [])
 
   useEffect(() => {
     // Restore demo mode across page refreshes
@@ -76,6 +82,11 @@ export default function App() {
         <Route path="/profile" element={
           <ProtectedRoute requireOnboarded>
             <Profile />
+          </ProtectedRoute>
+        } />
+        <Route path="/roadmap" element={
+          <ProtectedRoute requireOnboarded>
+            <Roadmap />
           </ProtectedRoute>
         } />
         <Route path="/judge" element={

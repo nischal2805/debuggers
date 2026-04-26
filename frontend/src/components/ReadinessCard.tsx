@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import type { ReadinessSnapshot } from '../lib/types'
+import { normalizePct } from '../lib/utils'
 
 interface ReadinessCardProps {
   snapshot: ReadinessSnapshot
@@ -15,7 +16,7 @@ const SUB_LABELS: { key: keyof ReadinessSnapshot; label: string }[] = [
 ]
 
 export default function ReadinessCard({ snapshot, calibrationGap = 0 }: ReadinessCardProps) {
-  const total = Math.round(snapshot?.total ?? 0)
+  const total = normalizePct(snapshot?.total ?? 0)
   const totalColor = total >= 70 ? '#00e676' : total >= 40 ? '#ffb300' : '#ff4757'
 
   return (
@@ -49,7 +50,7 @@ export default function ReadinessCard({ snapshot, calibrationGap = 0 }: Readines
 
       <div className="space-y-2">
         {SUB_LABELS.map(({ key, label }) => {
-          const v = Math.round((snapshot?.[key] as number) ?? 0)
+          const v = normalizePct((snapshot?.[key] as number) ?? 0)
           return (
             <div key={key} className="flex items-center gap-3">
               <span className="font-body text-[10px] text-text-secondary uppercase tracking-wider w-20">{label}</span>

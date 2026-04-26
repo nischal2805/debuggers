@@ -260,11 +260,7 @@ async def get_countdown(authorization: str = Header(...)):
     avg_min_per_topic = 45  # heuristic: 45 min to meaningfully advance a topic
 
     if days_remaining > 0 and uncovered > 0:
-        if velocity_per_day > 0:
-            days_to_cover_all = uncovered / velocity_per_day
-            min_needed_per_day = round(daily_goal_min * (days_to_cover_all / days_remaining))
-        else:
-            min_needed_per_day = round(uncovered * avg_min_per_topic / max(days_remaining, 1))
+        min_needed_per_day = round(uncovered * avg_min_per_topic / max(days_remaining, 1))
     else:
         min_needed_per_day = daily_goal_min
 

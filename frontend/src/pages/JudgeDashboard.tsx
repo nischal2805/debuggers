@@ -5,6 +5,7 @@ import { useStore } from '../store/useStore'
 import { useKnowledgeModel } from '../hooks/useKnowledgeModel'
 import TrajectorySparkline from '../components/TrajectorySparkline'
 import { motion } from 'framer-motion'
+import NavBar from '../components/NavBar'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
@@ -109,15 +110,11 @@ export default function JudgeDashboard() {
 
   return (
     <div className="min-h-screen bg-bg-primary">
-      {/* Header */}
-      <header className="border-b border-border px-6 py-4">
-        <h1 className="font-display text-2xl font-bold text-text-primary">
-          NeuralDSA — Judge Dashboard
-        </h1>
-        <p className="font-body text-xs text-text-secondary mt-1">
-          {user?.name}'s real-time DSA learning state
-        </p>
-      </header>
+      <NavBar active="/judge" />
+      <div className="flex items-center gap-3 px-6 py-2.5 border-b border-border bg-bg-surface/60">
+        <span className="font-display font-bold text-text-primary text-sm">Judge Dashboard</span>
+        <span className="font-body text-xs text-text-secondary">— {user?.name}'s real-time state</span>
+      </div>
 
       {/* Main grid */}
       <div className="max-w-7xl mx-auto px-6 py-10">

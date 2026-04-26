@@ -18,6 +18,7 @@ import ProactiveHintPrompt from '../components/ProactiveHintPrompt'
 import AssessmentLevelBadge from '../components/AssessmentLevelBadge'
 import ReportCardPanel from '../components/ReportCardPanel'
 import MasteredCelebration from '../components/MasteredCelebration'
+import NavBar from '../components/NavBar'
 
 export default function Session() {
   const { topicId = 'arrays' } = useParams()
@@ -146,8 +147,9 @@ export default function Session() {
   return (
     <div className="min-h-screen bg-bg-primary flex flex-col">
       <MasteredCelebration />
+      <NavBar active="/session" interviewTopic={topicId} />
 
-      <header className="flex items-center justify-between px-6 py-3 border-b border-border">
+      <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-bg-surface/60">
         <div className="flex items-center gap-3">
           <button onClick={handleEnd} className="text-text-secondary hover:text-text-primary transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

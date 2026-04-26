@@ -12,7 +12,8 @@
       "Bash(venv/Scripts/uvicorn main:app --port 8000)",
       "Bash(venv/Scripts/uvicorn main:app --port 8000 --reload)",
       "Read(//tmp/**)",
-      "Bash(pkill -f uvicorn)"
+      "Bash(pkill -f uvicorn)",
+      "Bash(gunzip -c \"C:\\\\Users\\\\bhuva\\\\.claude\\\\projects\\\\D--hackathon\\\\5ffff2bd-aafd-4b33-94e8-fe2be925bf66\\\\tool-results\\\\webfetch-1777174061465-yt0swv.bin\")"
     ]
   }
 }

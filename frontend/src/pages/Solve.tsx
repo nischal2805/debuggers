@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import { auth } from '../firebase'
 import { useStore } from '../store/useStore'
 import { useAttemptTracker } from '../hooks/useAttemptTracker'
 import CodeEditor from '../components/CodeEditor'
 import ProblemPanel from '../components/ProblemPanel'
 import TestCasePanel from '../components/TestCasePanel'
+import NavBar from '../components/NavBar'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 const SUPPORTED_LANGUAGES = ['python', 'javascript']
@@ -365,7 +367,10 @@ export default function Solve() {
   if (loadingProblem) {
     return (
       <div className="min-h-screen bg-bg-primary flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
+        <div className="relative w-12 h-12">
+          <div className="absolute inset-0 w-12 h-12 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
+          <div className="absolute inset-2 w-8 h-8 border-2 border-accent-secondary/40 border-b-transparent rounded-full animate-spin" style={{ animationDuration: '0.65s', animationDirection: 'reverse' }} />
+        </div>
       </div>
     )
   }
@@ -386,7 +391,9 @@ export default function Solve() {
   return (
     <div className="h-screen bg-bg-primary flex flex-col overflow-hidden">
 
-      {/* ── Top bar ── */}
+      <NavBar active="/solve" interviewTopic={topicId} />
+
+      {/* ── Problem sub-header ── */}
       <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-surface flex-shrink-0 h-11">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate('/dashboard')} className="text-text-secondary hover:text-text-primary transition-colors">
@@ -429,28 +436,34 @@ export default function Solve() {
           </select>
 
           {/* Run button */}
-          <button
+          <motion.button
+            whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 26 }}
             onClick={handleRun}
             disabled={loadingRun || loadingSubmit}
-            className="flex items-center gap-1.5 font-body text-xs px-3 py-1.5 rounded border border-border text-text-secondary hover:text-text-primary hover:border-border/80 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 font-body text-xs px-3 py-1.5 rounded-lg border border-border text-text-secondary hover:text-text-primary hover:border-accent-secondary/40 hover:bg-accent-secondary/5 transition-all disabled:opacity-40"
           >
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
             </svg>
             {loadingRun ? 'running...' : 'run'}
-          </button>
+          </motion.button>
 
           {/* Submit button */}
-          <button
+          <motion.button
+            whileHover={{ scale: 1.04, boxShadow: '0 4px 16px rgba(108,99,255,0.4)' }}
+            whileTap={{ scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 26 }}
             onClick={handleSubmit}
             disabled={loadingRun || loadingSubmit}
-            className="flex items-center gap-1.5 font-body text-xs px-3 py-1.5 rounded bg-accent-primary hover:bg-accent-primary/90 text-white transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 font-body text-xs px-3 py-1.5 rounded-lg text-white transition-all disabled:opacity-40"
+            style={{ background: 'linear-gradient(135deg, #6c63ff, #5a54d4)', boxShadow: '0 2px 10px rgba(108,99,255,0.25)' }}
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
             {loadingSubmit ? 'submitting...' : 'submit'}
-          </button>
+          </motion.button>
         </div>
       </header>
 
@@ -458,7 +471,7 @@ export default function Solve() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Panel 1: Problem description ── */}
-        <div className="w-[380px] flex-shrink-0 border-r border-border flex flex-col overflow-hidden">
+        <div className="w-[380px] flex-shrink-0 border-r border-border flex flex-col overflow-hidden panel-accent-primary">
           {/* Tab strip */}
           <div className="flex border-b border-border flex-shrink-0 bg-bg-surface">
             <div className="flex items-center px-4 py-2 gap-1 border-b-2 border-accent-primary">
@@ -486,7 +499,7 @@ export default function Solve() {
         </div>
 
         {/* ── Panel 2: Editor + test results ── */}
-        <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
+        <div className="flex-1 flex flex-col overflow-hidden border-r border-border panel-accent-secondary">
           {/* Editor header */}
           <div className="flex items-center justify-between px-4 py-1.5 border-b border-border bg-bg-surface flex-shrink-0">
             <div className="flex items-center gap-1.5">
@@ -566,7 +579,7 @@ export default function Solve() {
         </div>
 
         {/* ── Panel 3: Agent ── always visible ── */}
-        <div className="w-[340px] flex-shrink-0 flex flex-col overflow-hidden bg-bg-surface">
+        <div className="w-[340px] flex-shrink-0 flex flex-col overflow-hidden bg-bg-surface panel-accent-success">
           {/* Agent header */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-border flex-shrink-0">
             <div className="flex items-center gap-2">
@@ -576,19 +589,21 @@ export default function Solve() {
               <span className="font-display font-semibold text-text-primary text-sm">Agent</span>
             </div>
             {/* Phase tabs */}
-            <div className="flex items-center gap-0.5 bg-bg-elevated rounded p-0.5 border border-border">
+            <div className="flex items-center gap-0.5 bg-bg-elevated rounded-lg p-0.5 border border-border">
               {(['approach', 'debug', 'review'] as const).map(ph => (
-                <button
+                <motion.button
                   key={ph}
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.96 }}
                   onClick={() => setAgentPhase(ph)}
-                  className="text-[10px] font-body px-2 py-0.5 rounded transition-colors capitalize"
+                  className="text-[10px] font-body px-2.5 py-0.5 rounded-md transition-all capitalize"
                   style={agentPhase === ph
-                    ? { background: '#6c63ff', color: '#fff' }
-                    : { color: '#8888aa' }
+                    ? { background: 'linear-gradient(135deg, #6c63ff, #5a54d4)', color: '#fff', boxShadow: '0 2px 8px rgba(108,99,255,0.35)' }
+                    : { color: 'var(--text-secondary)' }
                   }
                 >
                   {ph}
-                </button>
+                </motion.button>
               ))}
             </div>
           </div>
@@ -616,13 +631,14 @@ export default function Solve() {
                     rows={3}
                     className="w-full bg-bg-elevated border border-border rounded p-2 font-body text-xs text-text-primary resize-none focus:outline-none focus:border-accent-primary/40 placeholder:text-text-secondary/40"
                   />
-                  <button
+                  <motion.button
+                    whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                     onClick={() => sendToAgent(`Rate my approach for this problem: ${approachText || '(not written yet)'}`)}
                     disabled={agentLoading || !approachText.trim()}
-                    className="mt-1 w-full text-[10px] font-body py-1 rounded border border-accent-primary/30 text-accent-primary hover:bg-accent-primary/10 transition-colors disabled:opacity-40"
+                    className="mt-1 w-full text-[10px] font-body py-1.5 rounded-lg border border-accent-primary/40 text-accent-primary hover:bg-accent-primary/10 transition-all disabled:opacity-40"
                   >
                     rate my approach
-                  </button>
+                  </motion.button>
                 </div>
               )}
             </div>
@@ -631,13 +647,14 @@ export default function Solve() {
           {/* Debug shortcut */}
           {agentPhase === 'debug' && (runResults?.some(r => !r.passed) || submitResult && !submitResult.correct) && (
             <div className="px-3 py-2 border-b border-border flex-shrink-0">
-              <button
+              <motion.button
+                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                 onClick={() => sendToAgent('Analyze the failing test cases and help me find the bug in my code.')}
                 disabled={agentLoading}
-                className="w-full text-[10px] font-body py-1.5 rounded border border-accent-danger/30 text-accent-danger hover:bg-accent-danger/10 transition-colors disabled:opacity-40"
+                className="w-full text-[10px] font-body py-1.5 rounded-lg border border-accent-danger/40 text-accent-danger hover:bg-accent-danger/10 transition-all disabled:opacity-40"
               >
                 analyze failures
-              </button>
+              </motion.button>
             </div>
           )}
 

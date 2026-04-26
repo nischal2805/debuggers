@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { auth } from '../firebase'
 import { useStore } from '../store/useStore'
 
@@ -20,6 +21,7 @@ type CountdownData = {
 
 export default function CountdownWidget() {
   const { isDemoMode, demoToken } = useStore()
+  const navigate = useNavigate()
   const [data, setData] = useState<CountdownData | null>(null)
   const [settingDate, setSettingDate] = useState(false)
   const [dateInput, setDateInput] = useState('')
@@ -87,8 +89,10 @@ export default function CountdownWidget() {
   }
 
   const { days_remaining, total_topics, mastered, projected_covered, on_track, min_needed_per_day, daily_goal_min, velocity_per_day } = data
-  const coveragePercent = Math.round(((mastered ?? 0) / (total_topics ?? 47)) * 100)
-  const projectedPercent = Math.min(100, Math.round(((projected_covered ?? 0) / (total_topics ?? 47)) * 100))
+  const safeTotalTopics = (total_topics && total_topics > 0) ? total_topics : 47
+  const coveragePercent = Math.min(100, Math.round(((mastered ?? 0) / safeTotalTopics) * 100))
+  const projectedPercent = Math.min(100, Math.round(((projected_covered ?? 0) / safeTotalTopics) * 100))
+  const isCritical = (days_remaining ?? 99) <= 7
 
   const urgencyColor = (days_remaining ?? 30) < 7 ? '#ff4757' : (days_remaining ?? 30) < 14 ? '#ffb300' : '#6c63ff'
 
@@ -147,17 +151,31 @@ export default function CountdownWidget() {
       </div>
 
       {/* Pace recommendation */}
-      <div className="p-3 rounded" style={{ background: on_track ? 'rgba(0,230,118,0.06)' : 'rgba(255,183,0,0.06)', border: `1px solid ${on_track ? 'rgba(0,230,118,0.2)' : 'rgba(255,183,0,0.2)'}` }}>
+      <div className="p-3 rounded mb-3" style={{ background: on_track ? 'rgba(0,230,118,0.06)' : 'rgba(255,183,0,0.06)', border: `1px solid ${on_track ? 'rgba(0,230,118,0.2)' : 'rgba(255,183,0,0.2)'}` }}>
         {on_track ? (
           <p className="font-body text-xs" style={{ color: '#00e676' }}>
             On track. {velocity_per_day && velocity_per_day > 0 ? `${velocity_per_day.toFixed(1)} topics/day.` : ''}
           </p>
         ) : (
           <p className="font-body text-xs text-accent-warn">
-            Need {min_needed_per_day}min/day instead of {daily_goal_min}min to cover all {total_topics} topics.
+            Need {min_needed_per_day}min/day instead of {daily_goal_min}min to cover all {safeTotalTopics} topics.
           </p>
         )}
       </div>
+
+      {/* T-Minus link */}
+      <button
+        onClick={() => navigate('/tminus')}
+        className="w-full font-body text-xs py-2 rounded-lg transition-all"
+        style={{
+          background: isCritical ? 'rgba(255,71,87,0.1)' : 'rgba(108,99,255,0.08)',
+          border: `1px solid ${isCritical ? 'rgba(255,71,87,0.4)' : 'rgba(108,99,255,0.3)'}`,
+          color: isCritical ? '#ff4757' : '#6c63ff',
+          animation: isCritical ? 'pulse 1.5s infinite' : 'none',
+        }}
+      >
+        {isCritical ? 'T-Minus Protocol — activate now' : 'T-Minus Protocol →'}
+      </button>
     </div>
   )
 }
