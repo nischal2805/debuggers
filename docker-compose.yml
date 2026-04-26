@@ -30,6 +30,9 @@ services:
       DEMO_MODE: ${DEMO_MODE:-false}
       PISTON_URL: http://piston:2000
       JUDGE0_URL: ${JUDGE0_URL:-https://ce.judge0.com}
+      SQLITE_PATH: /app/data/neuraldsa_demo.db
+    volumes:
+      - ./data:/app/data
     ports:
       - "8000:8000"
     expose:
