@@ -52,20 +52,11 @@ export default function NavBar({ active, interviewTopic = 'arrays' }: NavBarProp
         style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexShrink: 0 }}
         onClick={() => navigate('/dashboard')}
       >
-        <div
-          style={{
-            width: 30, height: 30, borderRadius: '50%',
-            background: 'linear-gradient(135deg, #6c63ff, #00d4ff)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 12px rgba(108,99,255,0.5)',
-            flexShrink: 0,
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-            <circle cx="12" cy="12" r="3" fill="white" stroke="none" />
-            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-          </svg>
-        </div>
+        <img
+          src="/logo.png"
+          alt="NeuralDSA"
+          style={{ width: 36, height: 36, objectFit: 'contain', flexShrink: 0 }}
+        />
         <span
           style={{
             fontFamily: 'Syne, sans-serif',
