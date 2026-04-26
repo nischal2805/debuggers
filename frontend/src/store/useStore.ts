@@ -118,10 +118,14 @@ export const useStore = create<AppStore>((set, get) => ({
     masteredJustNow: [],
   }),
 
-  setKnowledgeModel: (knowledgeModel) => set({
+  setKnowledgeModel: (knowledgeModel) => set((state) => ({
     knowledgeModel,
-    readiness: knowledgeModel.readiness ?? { ...DEFAULT_READINESS },
-  }),
+    // Only overwrite readiness if the model has a computed value (total > 0).
+    // Default readiness is all-zeros — don't let it stomp a freshly fetched snapshot.
+    readiness: (knowledgeModel.readiness?.total ?? 0) > 0
+      ? knowledgeModel.readiness as ReadinessSnapshot
+      : state.readiness,
+  })),
 
   updateTopicMastery: (topicId, partial) =>
     set((state) => {

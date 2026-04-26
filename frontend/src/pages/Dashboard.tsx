@@ -31,13 +31,32 @@ function getWhyNextExplanation(topicId: string, masteryMap: Record<string, numbe
 }
 
 export default function Dashboard() {
-  const { user, readiness, calibrationGap, answerStreak } = useStore()
+  const { user, readiness, calibrationGap, answerStreak, setReadiness, isDemoMode, demoToken } = useStore()
   const model = useKnowledgeModel()
   const navigate = useNavigate()
   const [recommended, setRecommended] = useState<string | null>(null)
   const [roadmap, setRoadmap] = useState<string[]>([])
   const [sessionDates, setSessionDates] = useState<string[]>([])
   const [useProgressiveGraph, setUseProgressiveGraph] = useState(false)
+
+  // Fetch readiness on mount so ReadinessCard shows real data
+  useEffect(() => {
+    if (!user) return
+    const tokenPromise = isDemoMode && demoToken
+      ? Promise.resolve(demoToken)
+      : auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
+    tokenPromise.then(token => {
+      if (!token) return
+      fetch(`${BACKEND_URL}/user/readiness`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.snapshot) setReadiness(data.snapshot, data.calibration_gap ?? 0)
+        })
+        .catch(() => {})
+    })
+  }, [user, isDemoMode, demoToken, setReadiness])
 
   // Fetch roadmap from backend (authoritative)
   useEffect(() => {
@@ -187,9 +206,14 @@ export default function Dashboard() {
           >
             {useProgressiveGraph ? 'full graph' : 'progressive'}
           </button>
-          <button onClick={() => navigate('/roadmap')} className="font-body text-text-secondary text-sm hover:text-text-primary transition-colors">roadmap</button>
           <button onClick={() => navigate('/profile')} className="font-body text-text-secondary text-sm hover:text-text-primary transition-colors">profile</button>
           <button onClick={() => navigate('/judge')} className="font-body text-text-secondary text-sm hover:text-text-primary transition-colors">judge</button>
+          <button
+            onClick={() => navigate(`/interview/${recommended ?? 'arrays'}`)}
+            className="font-body text-xs px-3 py-1.5 rounded border border-accent-danger/40 text-accent-danger hover:bg-accent-danger/10 transition-colors"
+          >
+            interview
+          </button>
           <div className="w-7 h-7 rounded-full bg-accent-primary/20 border border-accent-primary/30 flex items-center justify-center text-xs font-body text-accent-primary">
             {user?.name?.[0] ?? 'U'}
           </div>

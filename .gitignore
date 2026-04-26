@@ -7,3 +7,4 @@ __pycache__/
 venv/
 serviceAccount.json
 *.log
+backend/neuraldsa_demo.db

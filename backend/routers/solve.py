@@ -29,7 +29,7 @@ from data.coding_problems import (
 from prompts.solve import SOLVE_EVALUATE_PROMPT, SOLVE_HINT_PROMPT, SOLVE_AGENT_PROMPT
 from services import demo_store
 from services.firestore import get_knowledge_model, save_knowledge_model, append_event
-from services.llm_client import get_provider
+from services.llm_client import get_provider, parse_llm_json
 from services.runner import run_code, normalize_output, available_languages
 from models.knowledge import update_mastery, migrate_knowledge_model, update_readiness
 
@@ -227,6 +227,8 @@ async def get_hint(req: HintRequest, authorization: str = Header(...)):
     static_hint = static_hints[hint_idx] if static_hints else "Think about the pattern."
 
     # Try LLM hint — fall back to static if LLM fails
+    hint_text = static_hint
+    hint_level = req.hint_number
     try:
         prompt = SOLVE_HINT_PROMPT.format(
             lc=p["lc"],
@@ -239,16 +241,19 @@ async def get_hint(req: HintRequest, authorization: str = Header(...)):
         )
         provider = get_provider()
         raw = await provider.complete_json(
-            system="You are a DSA hint engine. Return only valid JSON with field 'hint' (string) and 'hint_level' (int).",
+            system="You are a DSA hint engine. Return only valid JSON with field 'hint' (string) and 'hint_level' (int). No markdown fences.",
             prompt=prompt,
         )
-        import json as _json
-        parsed = _json.loads(raw) if isinstance(raw, str) else raw
-        hint_text = parsed.get("hint") or static_hint
-        hint_level = parsed.get("hint_level") or req.hint_number
-    except Exception:
-        hint_text = static_hint
-        hint_level = req.hint_number
+        parsed = parse_llm_json(raw)
+        if parsed and isinstance(parsed, dict):
+            hint_text = parsed.get("hint") or static_hint
+            hint_level = parsed.get("hint_level") or req.hint_number
+        else:
+            import sys
+            print(f"[hint] LLM returned unparseable JSON, raw={repr(raw[:200])}", file=sys.stderr)
+    except Exception as exc:
+        import sys
+        print(f"[hint] LLM call failed: {exc}", file=sys.stderr)
 
     return {
         "hint": hint_text,
@@ -331,13 +336,14 @@ async def evaluate_attempt(req: EvaluateRequest, authorization: str = Header(...
     evaluation: dict
     try:
         raw = await provider.complete_json(
-            system="You are a DSA solution evaluator. Return only valid JSON.",
+            system="You are a DSA solution evaluator. Return only valid JSON. No markdown fences.",
             prompt=eval_prompt,
         )
-        import json as _json
-        evaluation = _json.loads(raw) if isinstance(raw, str) else raw
-        if not isinstance(evaluation, dict):
-            raise ValueError("Non-dict response")
+        evaluation = parse_llm_json(raw) or {}
+        if not isinstance(evaluation, dict) or not evaluation:
+            import sys
+            print(f"[evaluate] parse failed, raw={repr(raw[:300])}", file=sys.stderr)
+            raise ValueError("empty or non-dict LLM response")
     except Exception:
         # Heuristic-only fallback (no LLM needed)
         stderr_any = any(r.get("stderr") for r in public_results)
@@ -502,18 +508,22 @@ async def solve_agent_chat(req: AgentChatRequest, authorization: str = Header(..
     )
 
     provider = get_provider()
+    result: dict
     try:
-        import json as _json
         raw = await provider.complete_json(
-            system="You are a DSA coaching agent. Return only valid JSON.",
+            system="You are a DSA coaching agent. Return only valid JSON. No markdown fences, no extra text.",
             prompt=prompt,
-            max_tokens=400,
+            max_tokens=500,
             temperature=0.3,
         )
-        result = _json.loads(raw) if isinstance(raw, str) else raw
-        if not isinstance(result, dict):
-            raise ValueError("bad response")
-    except Exception:
+        result = parse_llm_json(raw) or {}
+        if not isinstance(result, dict) or not result:
+            import sys
+            print(f"[agent] parse failed, raw={repr(raw[:300])}", file=sys.stderr)
+            raise ValueError("empty or non-dict LLM response")
+    except Exception as exc:
+        import sys
+        print(f"[agent] LLM error (phase={req.phase}): {exc}", file=sys.stderr)
         # Heuristic fallback
         if req.phase == "approach":
             response = "Write out your approach before coding. What data structure will you use, and what is the time complexity?"

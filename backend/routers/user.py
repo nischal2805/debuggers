@@ -199,6 +199,7 @@ async def set_interview_date(req: InterviewDateRequest, authorization: str = Hea
     if is_demo:
         profile = demo_store.get_profile(token)
         profile["interviewDate"] = req.interview_date
+        demo_store.save_profile(token, profile)
     else:
         from services.firestore import get_db
         get_db().collection("users").document(uid).set(
@@ -281,4 +282,100 @@ async def get_countdown(authorization: str = Header(...)):
         "daily_goal_min": daily_goal_min,
         "min_needed_per_day": min_needed_per_day,
         "on_track": on_track,
+    }
+
+
+@router.get("/solve_history")
+async def get_solve_history(authorization: str = Header(...)):
+    """
+    Return recent solve events with rich behavioral metadata for the Profile page.
+    Shows: problem title, topic, correctness, timing, hints used, behavioral notes.
+    """
+    uid, is_demo, token = await _resolve_token(authorization)
+
+    # Problem title lookup — import here to avoid circular deps
+    from data.coding_problems import get_problem
+
+    if is_demo:
+        events = demo_store.list_events(token, limit=100)
+    else:
+        # For firebase users, load from events subcollection
+        try:
+            from services.firestore import get_db
+            db = get_db()
+            snaps = (
+                db.collection("users").document(uid).collection("events")
+                .order_by("ts", direction="DESCENDING").limit(50).stream()
+            )
+            events = [s.to_dict() for s in snaps]
+        except Exception:
+            events = []
+
+    # Filter to solve/judge submits only
+    solve_events = [
+        e for e in events
+        if e.get("kind") in ("solve_submit", "judge_submit")
+    ]
+
+    rows = []
+    for e in solve_events[:30]:
+        problem_id = e.get("problem_id", "")
+        p = get_problem(problem_id)
+        title = p["title"] if p else problem_id.replace("_", " ").title()
+        lc = p.get("lc", "") if p else ""
+
+        total_ms = e.get("total_time_ms", 0) or 0
+        minutes = round(total_ms / 60000, 1) if total_ms else None
+        first_ks = e.get("first_keystroke_ms", 0) or 0
+
+        # Build behavioral insight string
+        notes = []
+        if e.get("approach_written"):
+            notes.append("Planned approach first")
+        if e.get("hints_requested", 0) == 0 and e.get("correct"):
+            notes.append("Solved without hints")
+        elif e.get("hints_requested", 0) >= 3:
+            notes.append(f"Used {e.get('hints_requested')} hints")
+        if first_ks > 60000:
+            notes.append("Long planning phase")
+        elif first_ks < 5000 and not e.get("correct"):
+            notes.append("Rushed start")
+        if e.get("timed_out"):
+            notes.append("TLE — needs optimization")
+        if e.get("num_runs", 0) >= 5:
+            notes.append("Many test runs")
+
+        rows.append({
+            "problem_id": problem_id,
+            "lc": lc,
+            "title": title,
+            "topic": e.get("topic", ""),
+            "pattern": e.get("pattern", ""),
+            "correct": bool(e.get("correct", False)),
+            "passed": e.get("passed"),
+            "total": e.get("total"),
+            "language": e.get("language", "python"),
+            "mastery_delta": e.get("mastery_delta", 0),
+            "total_time_min": minutes,
+            "hints_requested": e.get("hints_requested", 0),
+            "approach_written": bool(e.get("approach_written", False)),
+            "num_runs": e.get("num_runs", 0),
+            "timed_out": bool(e.get("timed_out", False)),
+            "behavioral_insight": " · ".join(notes) if notes else None,
+            "ts": e.get("ts", ""),
+        })
+
+    # Summary stats
+    total_solved = len(rows)
+    correct_count = sum(1 for r in rows if r["correct"])
+    topics_touched = len({r["topic"] for r in rows if r["topic"]})
+
+    return {
+        "history": rows,
+        "summary": {
+            "total_solved": total_solved,
+            "correct": correct_count,
+            "accuracy": round(correct_count / total_solved * 100) if total_solved else 0,
+            "topics_touched": topics_touched,
+        },
     }

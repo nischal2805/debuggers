@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 import firebase_admin.auth as fb_auth
 
-from data.coding_problems import get_problem, list_problems, CODING_PROBLEMS
+from data.coding_problems import get_problem, list_problems, CODING_PROBLEMS, TOPIC_PROBLEMS
 from services import demo_store
 from services.runner import run_code as _runner_run, normalize_output, available_languages
 from services.firestore import get_knowledge_model, save_knowledge_model
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/interview", tags=["interview"])
 
 INTERVIEW_TIME_LIMIT_MIN = 45
 RUNNER_TIMEOUT_S = 8.0
-READY_MASTERY_THRESHOLD = 0.70
+READY_MASTERY_THRESHOLD = 0.0  # unlocked for demo — no gate
 
 
 class CheckReadyRequest(BaseModel):
@@ -97,7 +97,7 @@ async def check_ready(req: CheckReadyRequest, authorization: str = Header(...)):
     hints = topic_stat.get("hintRequests", 0)
     avg_time_s = int((topic_stat.get("avgTimeMs", 60000)) / 1000)
 
-    ready = mastery >= READY_MASTERY_THRESHOLD and attempts >= 3
+    ready = True  # unlocked — mastery check removed for demo
 
     if ready:
         reason = f"Mastery {round(mastery * 100)}% — ready for cold interview conditions."
@@ -126,37 +126,47 @@ async def start_interview(req: StartRequest, authorization: str = Header(...)):
     topic_stat = model.get("topics", {}).get(req.topic, {})
     mastery = topic_stat.get("mastery", topic_stat.get("knowledge", 0))
 
-    if mastery < READY_MASTERY_THRESHOLD:
-        raise HTTPException(status_code=403, detail=f"Mastery {round(mastery*100)}% below threshold {round(READY_MASTERY_THRESHOLD*100)}%")
+    # No mastery gate — interview available for all topics
+
+    _diff_order = {"easy": 1, "medium": 2, "hard": 3}
 
     if req.problem_id:
         p = get_problem(req.problem_id)
         if not p:
             raise HTTPException(status_code=404, detail="Problem not found")
     else:
-        # Pick hardest problem for this topic that user hasn't solved in interview mode
+        # Pick hardest unsolved problem for this topic using TOPIC_PROBLEMS index
         events = demo_store.list_events(token, limit=200) if is_demo else []
         interview_solved = {e.get("problem_id") for e in events if e.get("kind") == "interview_submit" and e.get("correct")}
-        candidates = [pp for pp in CODING_PROBLEMS if pp["topic"] == req.topic and pp["id"] not in interview_solved]
+        topic_pids = TOPIC_PROBLEMS.get(req.topic, [])
+        candidates = [CODING_PROBLEMS[pid] for pid in topic_pids if pid in CODING_PROBLEMS and pid not in interview_solved]
         if not candidates:
-            candidates = [pp for pp in CODING_PROBLEMS if pp["topic"] == req.topic]
-        candidates.sort(key=lambda x: x.get("difficulty", 5), reverse=True)
+            candidates = [CODING_PROBLEMS[pid] for pid in topic_pids if pid in CODING_PROBLEMS]
+        if not candidates:
+            # last resort: any medium/hard problem
+            candidates = sorted(
+                [p for p in CODING_PROBLEMS.values() if p.get("difficulty") in ("medium", "hard")],
+                key=lambda x: _diff_order.get(x.get("difficulty", "easy"), 1), reverse=True
+            )[:5]
+        candidates.sort(key=lambda x: _diff_order.get(x.get("difficulty", "easy"), 1), reverse=True)
         p = candidates[0] if candidates else None
 
     if not p:
         raise HTTPException(status_code=404, detail=f"No problems found for topic: {req.topic}")
 
     available_langs = available_languages()
-    filtered_langs = [l for l in p.get("languages", ["python"]) if l in available_langs]
+    filtered_langs = [l for l in p.get("starter_code", {}).keys() if l in available_langs]
+    if not filtered_langs:
+        filtered_langs = ["python"]
 
     return {
         "problem": {
             "id": p["id"],
             "title": p["title"],
-            "description": p["description"],
+            "description": p.get("statement", ""),
             "examples": p.get("examples", []),
             "constraints": p.get("constraints", []),
-            "difficulty": p.get("difficulty", 5),
+            "difficulty": p.get("difficulty", "medium"),
             "pattern": p.get("pattern", ""),
             "starter_code": {l: p["starter_code"][l] for l in filtered_langs if l in p.get("starter_code", {})},
             "languages": filtered_langs,

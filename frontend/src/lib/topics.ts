@@ -129,7 +129,6 @@ export function getTopicLabel(topicId: string): string {
   return TOPIC_GRAPH[topicId]?.label ?? topicId
 }
 
-export function arePrereqsMet(topicId: string, masteryMap: Record<string, number>): boolean {
-  const prereqs = TOPIC_GRAPH[topicId]?.prereqs ?? []
-  return prereqs.every(p => (masteryMap[p] ?? 0) > 0.5)
+export function arePrereqsMet(_topicId: string, _masteryMap: Record<string, number>): boolean {
+  return true  // all topics unlocked
 }

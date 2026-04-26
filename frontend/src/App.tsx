@@ -8,7 +8,6 @@ import Onboarding from './pages/Onboarding'
 import Dashboard from './pages/Dashboard'
 import Session from './pages/Session'
 import Solve from './pages/Solve'
-import Roadmap from './pages/Roadmap'
 import Profile from './pages/Profile'
 import JudgeDashboard from './pages/JudgeDashboard'
 import Interview from './pages/Interview'
@@ -71,11 +70,6 @@ export default function App() {
         <Route path="/solve/:topicId" element={
           <ProtectedRoute requireOnboarded>
             <Solve />
-          </ProtectedRoute>
-        } />
-        <Route path="/roadmap" element={
-          <ProtectedRoute requireOnboarded>
-            <Roadmap />
           </ProtectedRoute>
         } />
         <Route path="/profile" element={

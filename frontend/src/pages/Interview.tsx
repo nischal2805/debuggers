@@ -68,7 +68,11 @@ export default function Interview() {
     if (!topicId) return
     const load = async () => {
       const token = await getToken(isDemoMode, demoToken)
-      if (!token) return
+      if (!token) {
+        setError('Not signed in. Please log in or use demo mode.')
+        setPhase('briefing')
+        return
+      }
       const r = await fetch(`${BACKEND_URL}/interview/check`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

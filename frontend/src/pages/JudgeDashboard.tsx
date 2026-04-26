@@ -1,13 +1,35 @@
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { auth } from '../firebase'
 import { useStore } from '../store/useStore'
 import { useKnowledgeModel } from '../hooks/useKnowledgeModel'
 import TrajectorySparkline from '../components/TrajectorySparkline'
 import { motion } from 'framer-motion'
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+
 export default function JudgeDashboard() {
   const navigate = useNavigate()
-  const { user, readiness, lastReport } = useStore()
+  const { user, readiness, lastReport, setReadiness, isDemoMode, demoToken } = useStore()
   const model = useKnowledgeModel()
+
+  useEffect(() => {
+    if (!user) return
+    const tokenPromise = isDemoMode && demoToken
+      ? Promise.resolve(demoToken)
+      : auth?.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)
+    tokenPromise.then(token => {
+      if (!token) return
+      fetch(`${BACKEND_URL}/user/readiness`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.snapshot) setReadiness(data.snapshot, data.calibration_gap ?? 0)
+        })
+        .catch(() => {})
+    })
+  }, [user, isDemoMode, demoToken, setReadiness])
 
   if (!user || !model) {
     return (
@@ -187,10 +209,10 @@ export default function JudgeDashboard() {
               {/* Interpretation */}
               <div className="bg-bg-primary rounded p-4 border border-border">
                 <p className="font-body text-xs text-text-secondary">
-                  {readiness.total < 20 ? '🔴 New to DSA. Focus on foundations (arrays, strings, basic trees).' :
-                   readiness.total < 40 ? '🟡 Intermediate. Solidify core concepts before tackling advanced DP.' :
-                   readiness.total < 70 ? '🟢 Advanced. Ready for FAANG-style interviews with more practice on hard DP/graphs.' :
-                   '⭐ Expert level. Ready for final-round system design + interview simulation.'}
+                  {readiness.total < 20 ? 'New to DSA. Focus on foundations: arrays, strings, basic trees.' :
+                   readiness.total < 40 ? 'Intermediate. Solidify core concepts before tackling advanced DP.' :
+                   readiness.total < 70 ? 'Advanced. Ready for FAANG-style interviews with more practice on hard DP and graphs.' :
+                   'Expert level. Ready for final-round interview simulation.'}
                 </p>
               </div>
             </div>

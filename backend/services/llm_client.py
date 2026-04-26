@@ -45,7 +45,18 @@ _ALLOWED_ANSWER_TYPES = {"code", "text", "multiple_choice", "complexity"}
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _strip_json_fences(text: str) -> str:
+    """Strip markdown code block wrappers LLMs sometimes emit."""
+    t = text.strip()
+    if t.startswith("```"):
+        t = re.sub(r'^```[a-zA-Z]*\n?', '', t)
+        t = re.sub(r'\n?```\s*$', '', t)
+        t = t.strip()
+    return t
+
+
 def _parse_json(text: str) -> dict:
+    text = _strip_json_fences(text)
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -57,6 +68,14 @@ def _parse_json(text: str) -> dict:
             except Exception:
                 pass
     return {}
+
+
+def parse_llm_json(raw: str) -> dict | None:
+    """Public robust JSON parser for LLM output. Returns None on total failure."""
+    if not raw or not isinstance(raw, str):
+        return None
+    result = _parse_json(raw)
+    return result if result else None
 
 
 def _extract_content_text(text: str) -> str:
@@ -505,6 +524,97 @@ class MiniMaxBedrockProvider(LLMProvider):
             yield text
 
 
+class NovaBedrockProvider(LLMProvider):
+    """
+    Amazon Nova Lite / Micro via AWS Bedrock Converse API.
+    Confirmed working: returns clean JSON text (no reasoning-only blocks).
+    Default model: amazon.nova-lite-v1:0  (smarter than micro, still fast+cheap)
+    Fallback:       amazon.nova-micro-v1:0
+
+    Set env vars: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION.
+    Override model via BEDROCK_MODEL_ID env var.
+    """
+    name = "nova"
+
+    def __init__(self, model_id: Optional[str] = None) -> None:
+        self.model_id = model_id or os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
+        self.region = os.environ.get("AWS_REGION", "us-east-1")
+        try:
+            import boto3
+            self._client = boto3.client(
+                "bedrock-runtime",
+                region_name=self.region,
+                aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+                aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+            )
+        except Exception as e:
+            raise RuntimeError(f"boto3 not installed or AWS credentials missing: {e}")
+
+    def _converse_kwargs(
+        self, prompt: str, system: Optional[str], max_tokens: int, temperature: float
+    ) -> dict:
+        # Nova caps temperature at 1.0 and uses inferenceConfig
+        temperature = max(0.0, min(1.0, temperature))
+        return {
+            "modelId": self.model_id,
+            "system": [{"text": system or "Return only valid JSON."}],
+            "messages": [{"role": "user", "content": [{"text": prompt}]}],
+            "inferenceConfig": {
+                "maxTokens": max_tokens,
+                "temperature": temperature,
+            },
+        }
+
+    async def complete_json(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 600,
+        temperature: float = 0.2,
+        system: Optional[str] = None,
+    ) -> str:
+        import asyncio
+        kwargs = self._converse_kwargs(prompt, system, max_tokens, temperature)
+
+        def _invoke():
+            resp = self._client.converse(**kwargs)
+            content = resp["output"]["message"]["content"]
+            # Nova returns plain text blocks — no reasoning blocks
+            parts = [b["text"] for b in content if "text" in b]
+            return _strip_json_fences("".join(parts))
+
+        return await asyncio.get_event_loop().run_in_executor(None, _invoke)
+
+    async def stream_json(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 800,
+        temperature: float = 0.35,
+        system: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        import asyncio
+        kwargs = self._converse_kwargs(prompt, system, max_tokens, temperature)
+
+        def _invoke_stream():
+            resp = self._client.converse_stream(**kwargs)
+            chunks = []
+            for event in resp["stream"]:
+                delta = event.get("contentBlockDelta", {}).get("delta", {})
+                text = delta.get("text", "")
+                if text:
+                    chunks.append(text)
+            return chunks
+
+        texts = await asyncio.get_event_loop().run_in_executor(None, _invoke_stream)
+        # Yield everything at once after stripping leading fences
+        full = "".join(texts)
+        stripped = _strip_json_fences(full)
+        if stripped:
+            yield stripped
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Provider factory
 # ─────────────────────────────────────────────────────────────────────────────
@@ -524,7 +634,9 @@ def get_provider() -> LLMProvider:
         return _provider
     name = (os.environ.get("LLM_PROVIDER", "gemini") or "gemini").strip().lower()
     try:
-        if name == "minimax":
+        if name in ("nova", "nova-lite", "nova_lite"):
+            _provider = NovaBedrockProvider()
+        elif name == "minimax":
             _provider = MiniMaxBedrockProvider()
         elif name == "bedrock":
             _provider = BedrockProvider()
