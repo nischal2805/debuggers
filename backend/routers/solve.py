@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 import firebase_admin.auth as fb_auth
 
-from data.coding_problems import (
+from services.coding_problems import (
     CODING_PROBLEMS,
     get_problem,
     pick_problem_for_topic,

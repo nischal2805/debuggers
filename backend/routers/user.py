@@ -290,7 +290,7 @@ async def get_solve_history(authorization: str = Header(...)):
     uid, is_demo, token = await _resolve_token(authorization)
 
     # Problem title lookup — import here to avoid circular deps
-    from data.coding_problems import get_problem
+    from services.coding_problems import get_problem
 
     if is_demo:
         events = demo_store.list_events(token, limit=100)
@@ -410,7 +410,7 @@ async def get_tminus(authorization: str = Header(...)):
     and a focused 2-hour review plan.
     """
     model, profile, token, is_demo = await _load(authorization)
-    from data.coding_problems import TOPIC_PROBLEMS, CODING_PROBLEMS
+    from services.coding_problems import TOPIC_PROBLEMS, CODING_PROBLEMS
 
     # Importance weights by topic (rough heuristic — frequency in FAANG interviews)
     IMPORTANCE = {

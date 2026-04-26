@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 import firebase_admin.auth as fb_auth
 
-from data.coding_problems import get_problem, list_problems, CODING_PROBLEMS, TOPIC_PROBLEMS
+from services.coding_problems import get_problem, list_problems, CODING_PROBLEMS, TOPIC_PROBLEMS
 from services import demo_store
 from services.runner import run_code as _runner_run, normalize_output, available_languages
 from services.firestore import get_knowledge_model, save_knowledge_model

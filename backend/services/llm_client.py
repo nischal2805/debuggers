@@ -26,7 +26,7 @@ import google.generativeai as genai
 
 from prompts.tutor import TUTOR_SYSTEM_PROMPT, EVALUATE_PROMPT
 from services.agent import AgentAction, agent_decide, build_agent_prompt
-from data.problem_catalog import get_problems_for_topic, format_problem_for_prompt
+from services.problem_catalog import get_problems_for_topic, format_problem_for_prompt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
