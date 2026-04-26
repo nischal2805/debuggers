@@ -379,3 +379,104 @@ async def get_solve_history(authorization: str = Header(...)):
             "topics_touched": topics_touched,
         },
     }
+
+
+@router.get("/events")
+async def get_events(
+    kind: str = "interview_submit",
+    limit: int = 20,
+    authorization: str = Header(...),
+):
+    """Return raw events filtered by kind. Used by Profile for interview history."""
+    uid, is_demo, token = await _resolve_token(authorization)
+    if is_demo:
+        all_events = demo_store.list_events(token, limit=200)
+    else:
+        try:
+            from services.firestore import get_db
+            db = get_db()
+            snaps = (
+                db.collection("users").document(uid).collection("events")
+                .order_by("ts", direction="DESCENDING").limit(100).stream()
+            )
+            all_events = [s.to_dict() for s in snaps]
+        except Exception:
+            all_events = []
+    filtered = [e for e in all_events if e.get("kind") == kind][:limit]
+    return {"events": filtered}
+
+
+@router.get("/tminus")
+async def get_tminus(authorization: str = Header(...)):
+    """
+    T-Minus Protocol: diagnostic for the 48h before an interview.
+    Returns top 3 highest-risk topics (high importance × low recent accuracy)
+    and a focused 2-hour review plan.
+    """
+    model, profile, token, is_demo = await _load(authorization)
+    from data.coding_problems import TOPIC_PROBLEMS, CODING_PROBLEMS
+
+    # Importance weights by topic (rough heuristic — frequency in FAANG interviews)
+    IMPORTANCE = {
+        "arrays": 0.95, "strings": 0.9, "linked_lists": 0.85,
+        "trees": 0.95, "graphs": 0.88, "dynamic_programming": 0.85,
+        "sliding_window": 0.82, "two_pointers": 0.82, "binary_search": 0.80,
+        "stack": 0.78, "heap": 0.80, "recursion": 0.75, "backtracking": 0.72,
+        "hashing": 0.85, "sorting": 0.70, "greedy": 0.72, "trie": 0.65,
+        "bit_manipulation": 0.60, "math": 0.55,
+    }
+
+    topics = model.get("topics", {})
+    scored = []
+    for topic_id, stat in topics.items():
+        mastery = stat.get("mastery", stat.get("knowledge", 0))
+        attempts = stat.get("attempts", 0)
+        importance = IMPORTANCE.get(topic_id, 0.5)
+        # Risk = importance × (1 - mastery), amplified if low attempts
+        coverage = min(1.0, attempts / 3)
+        risk = importance * (1 - mastery) * (0.5 + 0.5 * (1 - coverage))
+        if attempts > 0 or mastery > 0:
+            scored.append({
+                "topic": topic_id,
+                "mastery": round(mastery, 3),
+                "importance": importance,
+                "risk_score": round(risk, 3),
+                "attempts": attempts,
+            })
+
+    scored.sort(key=lambda x: x["risk_score"], reverse=True)
+    top3 = scored[:3]
+
+    # Build review plan: 2-3 problems per topic
+    review_plan = []
+    for item in top3:
+        topic_id = item["topic"]
+        pids = TOPIC_PROBLEMS.get(topic_id, [])
+        # Pick easy-medium problems for quick reinforcement
+        problems = []
+        for pid in pids[:6]:
+            p = CODING_PROBLEMS.get(pid)
+            if p and p.get("difficulty") in ("easy", "medium"):
+                problems.append({"id": pid, "title": p["title"], "difficulty": p.get("difficulty", "medium")})
+            if len(problems) >= 3:
+                break
+        review_plan.append({
+            "topic": topic_id,
+            "mastery": item["mastery"],
+            "risk_score": item["risk_score"],
+            "importance": item["importance"],
+            "why": f"{'Completely unstudied' if item['attempts'] == 0 else 'Low accuracy'} — appears in ~{round(item['importance'] * 100)}% of FAANG interviews",
+            "time_allocation_min": 40,
+            "problems": problems,
+        })
+
+    stop_topics = [t["topic"] for t in scored[3:8] if t["risk_score"] < 0.3]
+
+    interview_date = profile.get("interviewDate")
+    return {
+        "top_risk": review_plan,
+        "stop_studying": stop_topics[:3],
+        "total_time_min": 120,
+        "interview_date": interview_date,
+    }
+

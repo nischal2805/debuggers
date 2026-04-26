@@ -45,6 +45,14 @@ type ChatMsg = {
   next_focus?: string
   // for system verdict cards
   verdict?: SubmitResult
+  // for cognitive autopsy
+  autopsy?: {
+    layers: { id: number; name: string; status: 'pass' | 'fail' | 'skip'; note: string }[]
+    failure_layer: number
+    diagnosis: string
+    fix: string
+    drill_type: string
+  }
 }
 
 interface Problem {
@@ -98,6 +106,11 @@ export default function Solve() {
   const [approachText, setApproachText] = useState('')
   const [showApproach, setShowApproach] = useState(true)
   const chatBottomRef = useRef<HTMLDivElement>(null)
+
+  // Cognitive Autopsy
+  const [autopsyPhase, setAutopsyPhase] = useState<'idle' | 'q1' | 'q2' | 'q3' | 'loading' | 'done'>('idle')
+  const [autopsyAnswers, setAutopsyAnswers] = useState({ q1: '', q2: '', q3: '' })
+  const [autopsyInput, setAutopsyInput] = useState('')
 
   const tracker = useAttemptTracker()
 
@@ -283,8 +296,69 @@ export default function Solve() {
     navigate(`/solve/${next.topic}`, { replace: false })
     setProblem(next)
     setCode(next.starter_code[language] ?? next.starter_code.python ?? '')
+    setAutopsyPhase('idle')
+    setAutopsyAnswers({ q1: '', q2: '', q3: '' })
+    setAutopsyInput('')
     loadProblem(next.topic)
   }, [submitResult, navigate, loadProblem, language])
+
+  const startAutopsy = useCallback(() => {
+    setAutopsyPhase('q1')
+    setAutopsyInput('')
+    setChat(prev => [...prev, {
+      id: mkId(), role: 'agent',
+      content: 'COGNITIVE AUTOPSY INITIATED. Answer 3 questions so I can pinpoint exactly where your thinking broke down.',
+    }])
+    setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+  }, [])
+
+  const advanceAutopsy = useCallback(async () => {
+    const val = autopsyInput.trim()
+    if (!val || !problem) return
+    setAutopsyInput('')
+
+    if (autopsyPhase === 'q1') {
+      setAutopsyAnswers(a => ({ ...a, q1: val }))
+      setChat(prev => [...prev, { id: mkId(), role: 'user', content: val }])
+      setChat(prev => [...prev, { id: mkId(), role: 'agent', content: 'Q2: Walk me through what your code actually does, step by step, for the first failing test case.' }])
+      setAutopsyPhase('q2')
+    } else if (autopsyPhase === 'q2') {
+      setAutopsyAnswers(a => ({ ...a, q2: val }))
+      setChat(prev => [...prev, { id: mkId(), role: 'user', content: val }])
+      setChat(prev => [...prev, { id: mkId(), role: 'agent', content: 'Q3: What edge cases did you consider before submitting? (null, empty, negative, overflow, duplicates...)' }])
+      setAutopsyPhase('q3')
+    } else if (autopsyPhase === 'q3') {
+      const answers = { ...autopsyAnswers, q3: val }
+      setAutopsyAnswers(answers)
+      setChat(prev => [...prev, { id: mkId(), role: 'user', content: val }])
+      setAutopsyPhase('loading')
+
+      const token = await getToken(isDemoMode, demoToken)
+      if (!token) { setAutopsyPhase('idle'); return }
+      try {
+        const r = await fetch(`${BACKEND_URL}/solve/autopsy`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            problem_id: problem.id,
+            code,
+            language,
+            test_results: submitResult?.public_results ?? [],
+            q1_answer: answers.q1,
+            q2_answer: answers.q2,
+            q3_answer: answers.q3,
+          }),
+        })
+        const data = await r.json()
+        setChat(prev => [...prev, { id: mkId(), role: 'system', content: '', autopsy: data }])
+      } catch (e) {
+        setChat(prev => [...prev, { id: mkId(), role: 'agent', content: 'Autopsy failed — backend error.' }])
+      }
+      setAutopsyPhase('done')
+      setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+    }
+    setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+  }, [autopsyPhase, autopsyInput, autopsyAnswers, problem, code, language, submitResult, isDemoMode, demoToken])
 
   // ── Loading / empty states ────────────────────────────────────────────────────
 
@@ -570,6 +644,52 @@ export default function Solve() {
           {/* Chat messages */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin">
             {chat.map(msg => {
+              // Cognitive Autopsy result card
+              if (msg.role === 'system' && msg.autopsy) {
+                const a = msg.autopsy
+                const STATUS_ICON: Record<string, string> = { pass: '✓', fail: '✗', skip: '—' }
+                const STATUS_COLOR: Record<string, string> = { pass: '#00e676', fail: '#ff4757', skip: '#444466' }
+                return (
+                  <div key={msg.id} className="rounded-lg border border-accent-danger/40 bg-bg-elevated overflow-hidden font-mono text-xs">
+                    <div className="px-3 py-2 bg-accent-danger/10 border-b border-accent-danger/20 flex items-center justify-between">
+                      <span className="text-accent-danger font-bold tracking-wider text-[11px]">COGNITIVE AUTOPSY</span>
+                      <span className="text-text-secondary text-[10px] font-sans">{problem?.title}</span>
+                    </div>
+                    <div className="px-3 py-3 space-y-2">
+                      {a.layers.map(layer => (
+                        <div key={layer.id} className="flex items-start gap-2">
+                          <span className="font-bold flex-shrink-0 w-3 text-center" style={{ color: STATUS_COLOR[layer.status] }}>
+                            {STATUS_ICON[layer.status]}
+                          </span>
+                          <div className="flex-1">
+                            <span className="text-text-secondary text-[10px]">Layer {layer.id}: </span>
+                            <span className="text-[11px]" style={{ color: layer.status === 'fail' ? '#ff4757' : layer.status === 'pass' ? '#f0f0ff' : '#444466' }}>
+                              {layer.name}
+                            </span>
+                            {layer.status === 'fail' && (
+                              <div className="text-[10px] text-accent-danger/80 mt-0.5 font-sans leading-relaxed">{layer.note}</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="px-3 py-3 border-t border-border/50 space-y-3 font-sans">
+                      <div>
+                        <div className="text-[10px] text-accent-danger uppercase tracking-wider mb-1 font-mono">Diagnosis</div>
+                        <div className="text-[11px] text-text-primary leading-relaxed">{a.diagnosis}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-accent-warn uppercase tracking-wider mb-1 font-mono">Fix — not more algorithm study</div>
+                        <div className="text-[11px] text-text-secondary leading-relaxed">{a.fix}</div>
+                      </div>
+                      <div className="text-[10px] text-text-secondary pt-1 border-t border-border/30 font-mono">
+                        Prescribed: <span className="text-accent-secondary">{a.drill_type?.replace(/_/g, ' ')}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
+
               if (msg.role === 'system' && msg.verdict) {
                 const v = msg.verdict
                 const color = v.correct ? '#00e676' : '#ff4757'
@@ -625,6 +745,17 @@ export default function Solve() {
                             </div>
                           )
                         })}
+                      </div>
+                    )}
+                    {/* Autopsy trigger */}
+                    {!v.correct && autopsyPhase === 'idle' && (
+                      <div className="px-3 pb-3 pt-1 border-t border-border/50">
+                        <button
+                          onClick={startAutopsy}
+                          className="w-full py-1.5 text-[10px] font-body border border-accent-danger/40 text-accent-danger rounded hover:bg-accent-danger/10 transition-colors tracking-wider"
+                        >
+                          ⚕ RUN COGNITIVE AUTOPSY
+                        </button>
                       </div>
                     )}
                     {/* Next problem */}
@@ -696,29 +827,70 @@ export default function Solve() {
             <div ref={chatBottomRef} />
           </div>
 
-          {/* Chat input */}
+          {/* Chat input — replaced by autopsy Q&A when active */}
           <div className="border-t border-border p-3 flex-shrink-0 bg-bg-surface">
-            <div className="flex items-end gap-2">
-              <textarea
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToAgent() }
-                }}
-                placeholder="Ask the agent... (Shift+Enter for new line)"
-                rows={2}
-                className="flex-1 bg-bg-elevated border border-border rounded px-3 py-2 font-body text-xs text-text-primary resize-none focus:outline-none focus:border-accent-primary/40 placeholder:text-text-secondary/40"
-              />
-              <button
-                onClick={() => sendToAgent()}
-                disabled={agentLoading || !chatInput.trim()}
-                className="p-2 bg-accent-primary rounded-lg text-white disabled:opacity-40 hover:bg-accent-primary/90 transition-colors flex-shrink-0"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              </button>
-            </div>
+            {autopsyPhase !== 'idle' && autopsyPhase !== 'done' ? (
+              <div>
+                <div className="font-body text-[10px] text-accent-danger uppercase tracking-wider mb-1.5">
+                  {autopsyPhase === 'loading' ? (
+                    <span className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 border border-accent-danger border-t-transparent rounded-full animate-spin" />
+                      Analyzing cognitive layers...
+                    </span>
+                  ) : (
+                    <>
+                      {autopsyPhase === 'q1' && 'Q1: What pattern / algorithm did you plan to use? Why?'}
+                      {autopsyPhase === 'q2' && 'Q2: Walk through what your code does step by step.'}
+                      {autopsyPhase === 'q3' && 'Q3: What edge cases did you consider?'}
+                    </>
+                  )}
+                </div>
+                {autopsyPhase !== 'loading' && (
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      value={autopsyInput}
+                      onChange={e => setAutopsyInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); advanceAutopsy() } }}
+                      placeholder="Answer honestly — the more specific, the better the diagnosis..."
+                      rows={2}
+                      autoFocus
+                      className="flex-1 bg-bg-elevated border border-accent-danger/30 rounded px-3 py-2 font-body text-xs text-text-primary resize-none focus:outline-none focus:border-accent-danger/60 placeholder:text-text-secondary/40"
+                    />
+                    <button
+                      onClick={advanceAutopsy}
+                      disabled={!autopsyInput.trim()}
+                      className="p-2 bg-accent-danger rounded-lg text-white disabled:opacity-40 hover:bg-accent-danger/90 transition-colors flex-shrink-0"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-end gap-2">
+                <textarea
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToAgent() }
+                  }}
+                  placeholder="Ask the agent... (Shift+Enter for new line)"
+                  rows={2}
+                  className="flex-1 bg-bg-elevated border border-border rounded px-3 py-2 font-body text-xs text-text-primary resize-none focus:outline-none focus:border-accent-primary/40 placeholder:text-text-secondary/40"
+                />
+                <button
+                  onClick={() => sendToAgent()}
+                  disabled={agentLoading || !chatInput.trim()}
+                  className="p-2 bg-accent-primary rounded-lg text-white disabled:opacity-40 hover:bg-accent-primary/90 transition-colors flex-shrink-0"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

@@ -103,7 +103,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routers import auth, session, user, judge, solve, advisor, interview
+from routers import auth, session, user, judge, solve, advisor, interview, voice
 
 app.include_router(auth.router)
 app.include_router(session.router)
@@ -112,6 +112,7 @@ app.include_router(judge.router)
 app.include_router(solve.router)
 app.include_router(advisor.router)
 app.include_router(interview.router)
+app.include_router(voice.router)
 
 
 @app.get("/health")

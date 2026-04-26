@@ -9,3 +9,7 @@ python-jose[cryptography]==3.3.0
 httpx==0.27.2
 anthropic==0.39.0
 boto3>=1.34.0
+# Voice deps (optional — install separately if you want TTS/STT)
+# openai-whisper
+# soundfile
+# LuxTTS: pip install git+https://github.com/ysharma3501/LuxTTS.git

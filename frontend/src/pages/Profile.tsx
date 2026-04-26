@@ -47,6 +47,7 @@ export default function Profile() {
   // Solve history
   const [solveHistory, setSolveHistory] = useState<SolveHistoryItem[]>([])
   const [solveSummary, setSolveSummary] = useState<SolveHistorySummary | null>(null)
+  const [interviewEvents, setInterviewEvents] = useState<any[]>([])
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -69,6 +70,11 @@ export default function Profile() {
           if (data.history) setSolveHistory(data.history)
           if (data.summary) setSolveSummary(data.summary)
         })
+        .catch(() => {})
+      // Fetch interview events
+      fetch(`${BACKEND_URL}/user/events?kind=interview_submit&limit=10`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : { events: [] })
+        .then(data => { if (data.events) setInterviewEvents(data.events) })
         .catch(() => {})
     })
   }, [user, isDemoMode, demoToken, setReadiness])
@@ -318,6 +324,62 @@ export default function Profile() {
             </div>
           </div>
         </div>
+
+        {/* Interview Performance */}
+        {interviewEvents.length > 0 && (
+          <div className="bg-bg-surface border border-border rounded-lg p-5">
+            <p className="font-body text-xs text-text-secondary uppercase tracking-wider mb-4">Interview Performance</p>
+            <div className="space-y-3">
+              {interviewEvents.map((ev, i) => {
+                const s = ev.perception_signals ?? {}
+                const msgs = s.chat_message_count ?? 0
+                const commScore = Math.min(100, Math.round((msgs >= 4 ? 35 : msgs * 8) + (s.clarifying_q_count > 0 ? 15 : 0) + (s.self_corrections <= 1 ? 10 : 0) + 20))
+                const proactiveScore = Math.min(100, Math.round((s.edge_cases_proactive ? 45 : 10) + (s.complexity_proactive ? 35 : 10) + (s.clarifying_q_count >= 2 ? 20 : (s.clarifying_q_count ?? 0) * 7)))
+                const composureScore = Math.min(100, Math.round((s.first_msg_time_ms > 0 && s.first_msg_time_ms < 90000 ? 40 : s.first_msg_time_ms < 180000 ? 25 : 15) + (s.self_corrections === 0 ? 40 : s.self_corrections === 1 ? 28 : 14) + (msgs >= 2 ? 20 : 10)))
+                const edgeScore = Math.min(100, Math.round((s.edge_cases_proactive ? 55 : 15) + (ev.passed === ev.total && ev.total > 0 ? 30 : Math.round((ev.passed / Math.max(ev.total, 1)) * 30)) + 15))
+                const overall = Math.round((commScore + proactiveScore + composureScore + edgeScore) / 4)
+                const scoreColor = (n: number) => n >= 75 ? '#00e676' : n >= 50 ? '#6c63ff' : n >= 30 ? '#ffb300' : '#ff4757'
+                const VERDICT_COLORS: Record<string, string> = { 'Strong Hire': '#00e676', 'Hire': '#6c63ff', 'Borderline': '#ffb300', 'No Hire': '#ff4757' }
+                const vColor = VERDICT_COLORS[ev.verdict] ?? '#8888aa'
+                return (
+                  <div key={i} className="p-4 bg-bg-elevated border border-border/60 rounded-lg">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <span className="font-body text-xs font-semibold" style={{ color: vColor }}>{ev.verdict}</span>
+                        <span className="font-body text-xs text-text-secondary ml-2">{ev.topic?.replace(/_/g, ' ')} · {ev.passed}/{ev.total} tests · {ev.time_used_min}min</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="font-body text-xs text-text-secondary">Perception</span>
+                        <span className="font-display text-sm font-bold" style={{ color: scoreColor(overall) }}>{overall}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[['Comm', commScore], ['Proactive', proactiveScore], ['Composure', composureScore], ['Edge Cases', edgeScore]].map(([label, score]) => (
+                        <div key={label as string}>
+                          <div className="flex justify-between mb-0.5">
+                            <span className="font-body text-[10px] text-text-secondary">{label}</span>
+                            <span className="font-body text-[10px]" style={{ color: scoreColor(score as number) }}>{score}</span>
+                          </div>
+                          <div className="h-1 bg-bg-primary rounded-full">
+                            <div className="h-full rounded-full" style={{ width: `${score}%`, background: scoreColor(score as number) }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {(s.edge_cases_proactive || s.complexity_proactive || s.clarifying_q_count > 0) && (
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        {s.edge_cases_proactive && <span className="font-body text-[10px] px-1.5 py-0.5 rounded border border-green-500/30 text-green-400">✓ edge cases unprompted</span>}
+                        {s.complexity_proactive && <span className="font-body text-[10px] px-1.5 py-0.5 rounded border border-green-500/30 text-green-400">✓ complexity stated</span>}
+                        {s.clarifying_q_count > 0 && <span className="font-body text-[10px] px-1.5 py-0.5 rounded border border-accent-secondary/30 text-accent-secondary">✓ asked {s.clarifying_q_count} clarifying Q{s.clarifying_q_count > 1 ? 's' : ''}</span>}
+                        {s.self_corrections > 1 && <span className="font-body text-[10px] px-1.5 py-0.5 rounded border border-accent-warn/30 text-accent-warn">⚠ {s.self_corrections} self-corrections</span>}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Solve Activity History */}
         {solveHistory.length > 0 && (

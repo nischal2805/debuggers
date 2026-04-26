@@ -214,6 +214,12 @@ export default function Dashboard() {
           >
             interview
           </button>
+          <button
+            onClick={() => navigate('/tminus')}
+            className="font-body text-xs px-3 py-1.5 rounded border border-accent-warn/40 text-accent-warn hover:bg-accent-warn/10 transition-colors"
+          >
+            t-minus
+          </button>
           <div className="w-7 h-7 rounded-full bg-accent-primary/20 border border-accent-primary/30 flex items-center justify-center text-xs font-body text-accent-primary">
             {user?.name?.[0] ?? 'U'}
           </div>

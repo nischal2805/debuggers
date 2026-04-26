@@ -11,6 +11,7 @@ import Solve from './pages/Solve'
 import Profile from './pages/Profile'
 import JudgeDashboard from './pages/JudgeDashboard'
 import Interview from './pages/Interview'
+import TMinusProtocol from './pages/TMinusProtocol'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
@@ -85,6 +86,11 @@ export default function App() {
         <Route path="/interview/:topicId" element={
           <ProtectedRoute requireOnboarded>
             <Interview />
+          </ProtectedRoute>
+        } />
+        <Route path="/tminus" element={
+          <ProtectedRoute requireOnboarded>
+            <TMinusProtocol />
           </ProtectedRoute>
         } />
         <Route path="*" element={<Navigate to="/" replace />} />

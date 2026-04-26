@@ -21,9 +21,9 @@ from data.coding_problems import get_problem, list_problems, CODING_PROBLEMS, TO
 from services import demo_store
 from services.runner import run_code as _runner_run, normalize_output, available_languages
 from services.firestore import get_knowledge_model, save_knowledge_model
-from services.llm_client import get_provider
+from services.llm_client import get_provider, parse_llm_json
 from models.knowledge import migrate_knowledge_model
-from prompts.interview import INTERVIEWER_DEBRIEF_PROMPT
+from prompts.interview import INTERVIEWER_DEBRIEF_PROMPT, INTERVIEWER_CHAT_PROMPT
 
 router = APIRouter(prefix="/interview", tags=["interview"])
 
@@ -50,6 +50,35 @@ class SubmitRequest(BaseModel):
     num_runs: int = 0
     hints_requested: int = 0
     first_keystroke_ms: int = 0
+    # Behavioral perception signals
+    first_msg_time_ms: int = 0
+    self_corrections: int = 0
+    edge_cases_proactive: bool = False
+    complexity_proactive: bool = False
+    clarifying_q_count: int = 0
+    chat_message_count: int = 0
+
+
+class InterviewChatMessage(BaseModel):
+    role: str   # "interviewer" | "candidate"
+    content: str
+
+
+class InterviewChatRequest(BaseModel):
+    problem_id: str
+    message: str
+    current_code: str = ""
+    elapsed_ms: int = 0
+    tests_passed: int = -1
+    tests_total: int = -1
+    history: list[InterviewChatMessage] = []
+    trigger: str = "candidate"  # "candidate" | "checkin_15" | "checkin_30" | "checkin_final"
+
+
+class ApproachRequest(BaseModel):
+    problem_id: str
+    approach_text: str
+    elapsed_ms: int = 0
 
 
 async def _resolve_token(authorization: str) -> tuple[str, bool, str]:
@@ -182,6 +211,135 @@ async def start_interview(req: StartRequest, authorization: str = Header(...)):
     }
 
 
+@router.post("/chat")
+async def interview_chat(req: InterviewChatRequest, authorization: str = Header(...)):
+    """
+    Live interviewer agent during the coding phase.
+    Acts as a real tech interviewer: probes approach, complexity, edge cases.
+    Never gives hints. Checks in at 15/30 min marks.
+    """
+    await _resolve_token(authorization)
+    p = get_problem(req.problem_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Problem not found")
+
+    elapsed_min = round(req.elapsed_ms / 60000, 1)
+
+    history_text = "\n".join(
+        f"{'Interviewer' if m.role == 'interviewer' else 'Candidate'}: {m.content}"
+        for m in req.history[-8:]
+    ) or "(interview just started)"
+
+    # Inject trigger context into the message for automatic check-ins
+    effective_message = req.message
+    if req.trigger == "checkin_15":
+        effective_message = "[15 minutes elapsed — automatic check-in]"
+    elif req.trigger == "checkin_30":
+        effective_message = "[30 minutes elapsed — automatic check-in]"
+    elif req.trigger == "checkin_final":
+        effective_message = "[5 minutes remaining — automatic final pressure check]"
+
+    provider = get_provider()
+    try:
+        raw = await provider.complete_json(
+            system="You are a senior tech interviewer. Be direct, cold, professional. Return only valid JSON. No markdown fences.",
+            prompt=INTERVIEWER_CHAT_PROMPT.format(
+                problem_title=p["title"],
+                pattern=p.get("pattern", "unknown"),
+                difficulty=p.get("difficulty", "medium"),
+                elapsed_min=elapsed_min,
+                tests_passed=req.tests_passed,
+                tests_total=req.tests_total,
+                current_code=req.current_code[:1200] or "(no code written yet)",
+                history=history_text,
+                message=effective_message,
+            ),
+            max_tokens=300,
+            temperature=0.4,
+        )
+        result = parse_llm_json(raw) or {}
+        if not result or "message" not in result:
+            import sys
+            print(f"[interview/chat] parse failed, raw={repr(raw[:200])}", file=sys.stderr)
+            raise ValueError("no message in response")
+    except Exception as exc:
+        import sys
+        print(f"[interview/chat] LLM error: {exc}", file=sys.stderr)
+        # Contextual fallbacks based on trigger
+        if req.trigger == "checkin_15":
+            fallback = "Walk me through what you have so far."
+        elif req.trigger == "checkin_30":
+            fallback = "You have about 15 minutes left. What's your current status?"
+        elif req.trigger == "checkin_final":
+            fallback = "5 minutes. Where are you?"
+        elif elapsed_min > 35:
+            fallback = "Time is running out. What's blocking you?"
+        else:
+            fallback = "Walk me through your thinking on this."
+        result = {"message": fallback, "probe_type": "check_in", "internal_note": "llm_fallback"}
+
+    return {
+        "message": result.get("message", ""),
+        "probe_type": result.get("probe_type", "check_in"),
+        "elapsed_min": elapsed_min,
+    }
+
+
+@router.post("/approach")
+async def evaluate_approach(req: ApproachRequest, authorization: str = Header(...)):
+    """
+    Evaluate the candidate's stated approach/intuition before coding.
+    Interviewer gives one targeted probe question back.
+    """
+    await _resolve_token(authorization)
+    p = get_problem(req.problem_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Problem not found")
+
+    APPROACH_PROMPT = """You are a senior tech interviewer at Google/Meta/Microsoft.
+Candidate is solving: {title} (pattern: {pattern}, difficulty: {difficulty})
+They stated their approach:
+\"{approach}\"
+
+Evaluate their intuition. Return JSON:
+{{
+  "approach_quality": "strong" | "partial" | "wrong" | "vague",
+  "quality_score": 0.0-1.0,
+  "probe_question": "<1 probing question to test depth — no hints, no affirmation>",
+  "spotted_issue": "<specific flaw in their approach if any, else null>",
+  "complexity_stated": "<what complexity they claimed, or null if not mentioned>"
+}}"""
+
+    provider = get_provider()
+    try:
+        raw = await provider.complete_json(
+            system="You are a tech interviewer. Return only valid JSON. No markdown fences.",
+            prompt=APPROACH_PROMPT.format(
+                title=p["title"],
+                pattern=p.get("pattern", "unknown"),
+                difficulty=p.get("difficulty", "medium"),
+                approach=req.approach_text[:800],
+            ),
+            max_tokens=300,
+            temperature=0.3,
+        )
+        result = parse_llm_json(raw) or {}
+        if not result:
+            raise ValueError("empty")
+    except Exception as exc:
+        import sys
+        print(f"[interview/approach] LLM error: {exc}", file=sys.stderr)
+        result = {
+            "approach_quality": "partial",
+            "quality_score": 0.5,
+            "probe_question": "Walk me through the time and space complexity of your approach.",
+            "spotted_issue": None,
+            "complexity_stated": None,
+        }
+
+    return result
+
+
 @router.post("/submit")
 async def submit_interview(req: SubmitRequest, authorization: str = Header(...)):
     """Run all tests + generate mock interviewer debrief."""
@@ -237,9 +395,11 @@ async def submit_interview(req: SubmitRequest, authorization: str = Header(...))
             max_tokens=600,
             temperature=0.3,
         )
-        debrief = json.loads(raw) if isinstance(raw, str) else raw
-        if not isinstance(debrief, dict):
-            raise ValueError("Non-dict")
+        debrief = parse_llm_json(raw) or {}
+        if not isinstance(debrief, dict) or not debrief:
+            import sys
+            print(f"[interview/submit] parse failed, raw={repr(raw[:200])}", file=sys.stderr)
+            raise ValueError("empty debrief")
     except Exception:
         # Heuristic fallback
         debrief = _heuristic_debrief(p, passed, total, time_used_min, correct, req)
@@ -254,6 +414,14 @@ async def submit_interview(req: SubmitRequest, authorization: str = Header(...))
         "total": total,
         "time_used_min": time_used_min,
         "verdict": debrief.get("verdict", "No Hire"),
+        "perception_signals": {
+            "first_msg_time_ms": req.first_msg_time_ms,
+            "self_corrections": req.self_corrections,
+            "edge_cases_proactive": req.edge_cases_proactive,
+            "complexity_proactive": req.complexity_proactive,
+            "clarifying_q_count": req.clarifying_q_count,
+            "chat_message_count": req.chat_message_count,
+        },
     }
     if is_demo:
         demo_store.add_event(token, event)

@@ -549,6 +549,136 @@ async def solve_agent_chat(req: AgentChatRequest, authorization: str = Header(..
     }
 
 
+class AutopsyRequest(BaseModel):
+    problem_id: str
+    code: str = ""
+    language: str = "python"
+    test_results: list = []
+    q1_answer: str = ""   # "Describe your planned approach / pattern"
+    q2_answer: str = ""   # "Walk through what your code does step by step"
+    q3_answer: str = ""   # "What edge cases did you consider?"
+
+
+@router.post("/autopsy")
+async def cognitive_autopsy(req: AutopsyRequest, authorization: str = Header(...)):
+    """
+    Cognitive Autopsy: after a wrong answer, pinpoint which cognitive layer failed.
+    5 layers: Pattern Recognition → Algorithm Design → Code Translation
+              → Edge Case Handling → Complexity Analysis
+    1 LLM call → structured layer verdicts + diagnosis + targeted fix.
+    """
+    await _resolve_token(authorization)
+    p = get_problem(req.problem_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Problem not found")
+
+    failing = [r for r in req.test_results if not r.get("passed")][:3]
+    fail_summary = "\n".join(
+        f"  input={f.get('input','?')[:60]} expected={f.get('expected','?')} got={f.get('actual','?')[:60]}"
+        + (f" stderr={f['stderr'][:80]}" if f.get("stderr") else "")
+        for f in failing
+    ) or "(no test result data)"
+
+    prompt = f"""You are conducting a Cognitive Autopsy for a failed DSA attempt.
+
+PROBLEM: LC {p['lc']} — {p['title']}
+Topic: {p['topic']} | Pattern: {p['pattern']}
+Expected complexity: {p['expected_complexity']['time']} time, {p['expected_complexity']['space']} space
+
+FAILING TESTS:
+{fail_summary}
+
+SUBMITTED CODE ({req.language}):
+{req.code[:1500]}
+
+CANDIDATE'S SELF-REPORT:
+Q1 (Planned approach / pattern identified): {req.q1_answer or '(no answer)'}
+Q2 (Code walkthrough — what they think the code does): {req.q2_answer or '(no answer)'}
+Q3 (Edge cases considered): {req.q3_answer or '(no answer)'}
+
+TASK: Analyze which cognitive layer is the true failure point.
+
+The 5 layers in order:
+1. Pattern Recognition — did they identify the correct algorithm/pattern?
+2. Algorithm Design — was their mental logic correct?
+3. Code Translation — did the implementation match their mental model?
+4. Edge Case Handling — did they handle null/empty/boundary cases?
+5. Complexity Analysis — did they achieve the required time/space complexity?
+
+Return JSON with this exact structure:
+{{
+  "layers": [
+    {{"id": 1, "name": "Pattern Recognition", "status": "pass"|"fail"|"skip", "note": "one sentence"}},
+    {{"id": 2, "name": "Algorithm Design", "status": "pass"|"fail"|"skip", "note": "one sentence"}},
+    {{"id": 3, "name": "Code Translation", "status": "pass"|"fail"|"skip", "note": "one sentence"}},
+    {{"id": 4, "name": "Edge Case Handling", "status": "pass"|"fail"|"skip", "note": "one sentence"}},
+    {{"id": 5, "name": "Complexity Analysis", "status": "pass"|"fail"|"skip", "note": "one sentence"}}
+  ],
+  "failure_layer": 1-5,
+  "diagnosis": "2-3 sentence precise diagnosis of what broke and why",
+  "fix": "2-3 sentence prescription — what to practice, NOT 'study more algorithms'",
+  "drill_type": "pattern_drills"|"logic_drills"|"translation_drills"|"edge_case_drills"|"complexity_drills"
+}}
+
+Rules:
+- "skip" means that layer was never reached because an earlier layer failed
+- Be brutally precise — "you lost the complement relationship when naming variables" not "code has bugs"
+- The fix must be specific: "3 translation drills where you implement the same logic in 2 languages" not "practice more"
+- Only ONE layer should be "fail". Mark it as the earliest layer where failure occurred."""
+
+    provider = get_provider()
+    try:
+        raw = await provider.complete_json(
+            system="You are a cognitive failure analyst for DSA problems. Return only valid JSON. No markdown fences.",
+            prompt=prompt,
+            max_tokens=700,
+            temperature=0.2,
+        )
+        result = parse_llm_json(raw) or {}
+        if not isinstance(result, dict) or "layers" not in result:
+            raise ValueError("bad response")
+    except Exception as exc:
+        import sys
+        print(f"[autopsy] LLM error: {exc}", file=sys.stderr)
+        # Heuristic fallback based on Q answers and test results
+        has_stderr = any(r.get("stderr") for r in req.test_results)
+        q1_weak = len(req.q1_answer.strip()) < 20
+        q2_weak = len(req.q2_answer.strip()) < 20
+
+        if q1_weak:
+            fail_layer = 1
+        elif q2_weak:
+            fail_layer = 2
+        elif has_stderr:
+            fail_layer = 3
+        else:
+            fail_layer = 3  # most common
+
+        layer_names = ["Pattern Recognition", "Algorithm Design", "Code Translation",
+                       "Edge Case Handling", "Complexity Analysis"]
+        drill_map = {1: "pattern_drills", 2: "logic_drills", 3: "translation_drills",
+                     4: "edge_case_drills", 5: "complexity_drills"}
+
+        layers = []
+        for i, name in enumerate(layer_names, 1):
+            if i < fail_layer:
+                layers.append({"id": i, "name": name, "status": "pass", "note": "Appears intact based on your answers."})
+            elif i == fail_layer:
+                layers.append({"id": i, "name": name, "status": "fail", "note": "This is where the breakdown occurred."})
+            else:
+                layers.append({"id": i, "name": name, "status": "skip", "note": "Never reached."})
+
+        result = {
+            "layers": layers,
+            "failure_layer": fail_layer,
+            "diagnosis": f"The failure occurred at layer {fail_layer} ({layer_names[fail_layer-1]}). Your code did not correctly implement your intended logic.",
+            "fix": f"Run 3 targeted {drill_map[fail_layer].replace('_',' ')} focused specifically on {p['pattern'].replace('_',' ')} pattern. Not more algorithm study — that's the wrong medicine.",
+            "drill_type": drill_map[fail_layer],
+        }
+
+    return result
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _problem_response(problem: dict, mastery: float) -> dict:
