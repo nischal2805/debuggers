@@ -15,8 +15,8 @@ ENV VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
 ENV VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
 ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
 
-COPY package*.json ./
-RUN rm -f package-lock.json && npm install --legacy-peer-deps
+COPY package.json ./
+RUN npm install --legacy-peer-deps
 COPY . .
 RUN npm run build
 
